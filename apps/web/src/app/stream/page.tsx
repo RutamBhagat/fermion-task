@@ -245,7 +245,7 @@ export default function StreamPage() {
 	useEffect(() => {
 		initializeMediasoup();
 		return cleanup;
-	}, [initializeMediasoup, cleanup]);
+	}, [cleanup, initializeMediasoup]);
 
 	return (
 		<div className="container mx-auto space-y-6 p-4">
