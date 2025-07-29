@@ -2,6 +2,7 @@
 
 import { Device } from "mediasoup-client";
 import type {
+	Consumer,
 	DtlsParameters,
 	IceCandidate,
 	IceParameters,
@@ -28,15 +29,17 @@ export default function StreamPage() {
 	const [isConnected, setIsConnected] = useState(false);
 	const [isProducing, setIsProducing] = useState(false);
 	const [status, setStatus] = useState("Connecting to server...");
-	const [remoteStreams, _setRemoteStreams] = useState<MediaStream[]>([]);
+	const [remoteStreams, setRemoteStreams] = useState<MediaStream[]>([]);
 
 	const localVideoRef = useRef<HTMLVideoElement>(null);
 	const remoteVideoRef = useRef<HTMLVideoElement>(null);
 	const localStreamRef = useRef<MediaStream | null>(null);
 	const socketRef = useRef<Socket | null>(null);
 	const deviceRef = useRef<Device | null>(null);
-	const transportRef = useRef<Transport | null>(null);
+	const producerTransportRef = useRef<Transport | null>(null);
+	const consumerTransportRef = useRef<Transport | null>(null);
 	const producerRef = useRef<Producer | null>(null);
+	const consumersRef = useRef<Consumer[]>([]);
 
 	useEffect(() => {
 		let mounted = true;
@@ -93,7 +96,26 @@ export default function StreamPage() {
 
 				socket.on("newProducer", async ({ producerId, socketId }) => {
 					console.log("New producer available:", producerId, socketId);
-					// Simplified - just log for now
+					await createConsumer(producerId, socketId);
+				});
+
+				socket.on("producerClosed", ({ socketId }) => {
+					console.log("Producer closed:", socketId);
+					// Remove consumers associated with this producer
+					const remainingConsumers = consumersRef.current.filter(consumer => {
+						// Remove consumer if it belongs to the closed producer
+						if (consumer.producerId.includes(socketId)) {
+							consumer.close();
+							return false;
+						}
+						return true;
+					});
+					consumersRef.current = remainingConsumers;
+					
+					// Update remote streams
+					setRemoteStreams(prev => 
+						prev.filter((_, index) => index < remainingConsumers.length)
+					);
 				});
 			} catch (error) {
 				console.error("Failed to connect:", error);
@@ -111,8 +133,11 @@ export default function StreamPage() {
 			if (socketRef.current) {
 				socketRef.current.disconnect();
 			}
-			if (transportRef.current) {
-				transportRef.current.close();
+			if (producerTransportRef.current) {
+				producerTransportRef.current.close();
+			}
+			if (consumerTransportRef.current) {
+				consumerTransportRef.current.close();
 			}
 		};
 	}, []);
@@ -133,7 +158,7 @@ export default function StreamPage() {
 			});
 
 			const transport = device.createSendTransport(params);
-			transportRef.current = transport;
+			producerTransportRef.current = transport;
 
 			transport.on("connect", async ({ dtlsParameters }, callback) => {
 				socket.emit("connectTransport", { dtlsParameters }, callback);
@@ -167,6 +192,76 @@ export default function StreamPage() {
 		}
 	};
 
+	const createConsumer = async (producerId: string, socketId: string) => {
+		const socket = socketRef.current;
+		const device = deviceRef.current;
+
+		if (!socket || !device) return;
+
+		try {
+			// Create consumer transport if not exists
+			if (!consumerTransportRef.current) {
+				const { params } = await new Promise<TransportParams>((resolve) => {
+					socket.emit("createWebRtcTransport", {}, resolve);
+				});
+
+				const consumerTransport = device.createRecvTransport(params);
+				consumerTransportRef.current = consumerTransport;
+
+				consumerTransport.on("connect", async ({ dtlsParameters }, callback) => {
+					socket.emit("connectTransport", { dtlsParameters }, callback);
+				});
+			}
+
+			// Create consumer
+			const { params: consumerParams } = await new Promise<{
+				params: {
+					id: string;
+					producerId: string;
+					kind: "audio" | "video";
+					rtpParameters: any;
+				};
+			}>((resolve) => {
+				socket.emit(
+					"consume",
+					{
+						producerSocketId: socketId,
+						rtpCapabilities: device.rtpCapabilities,
+					},
+					resolve,
+				);
+			});
+
+			const consumer = await consumerTransportRef.current!.consume({
+				id: consumerParams.id,
+				producerId: consumerParams.producerId,
+				kind: consumerParams.kind,
+				rtpParameters: consumerParams.rtpParameters,
+			});
+
+			// Resume consumer
+			await new Promise<void>((resolve) => {
+				socket.emit("resume", { producerId }, resolve);
+			});
+
+			// Add consumer to list
+			consumersRef.current.push(consumer);
+
+			// Create media stream and display
+			const stream = new MediaStream([consumer.track]);
+			setRemoteStreams((prev) => [...prev, stream]);
+
+			// Display in remote video element
+			if (remoteVideoRef.current) {
+				remoteVideoRef.current.srcObject = stream;
+			}
+
+			console.log("Consumer created for producer:", producerId);
+		} catch (error) {
+			console.error("Failed to create consumer:", error);
+		}
+	};
+
 	return (
 		<div className="container mx-auto space-y-6 p-4">
 			<div className="text-center">
@@ -195,13 +290,19 @@ export default function StreamPage() {
 						<CardTitle>Remote Stream</CardTitle>
 					</CardHeader>
 					<CardContent>
-						{/* biome-ignore lint/a11y/useMediaCaption: Live video streams don't have captions */}
-						<video
-							ref={remoteVideoRef}
-							autoPlay
-							className="aspect-video w-full rounded-lg bg-gray-900"
-							aria-label="Remote video stream"
-						/>
+						{remoteStreams.length > 0 ? (
+							/* biome-ignore lint/a11y/useMediaCaption: Live video streams don't have captions */
+							<video
+								ref={remoteVideoRef}
+								autoPlay
+								className="aspect-video w-full rounded-lg bg-gray-900"
+								aria-label="Remote video stream"
+							/>
+						) : (
+							<div className="aspect-video w-full rounded-lg bg-gray-900 flex items-center justify-center text-gray-400">
+								<p>Waiting for remote stream...</p>
+							</div>
+						)}
 					</CardContent>
 				</Card>
 			</div>
@@ -228,7 +329,9 @@ export default function StreamPage() {
 						</p>
 						<p>Device Ready: {deviceRef.current ? "🟢 Yes" : "🔴 No"}</p>
 						<p>Producing: {isProducing ? "🟢 Yes" : "🔴 No"}</p>
+						<p>Consumer Transport: {consumerTransportRef.current ? "🟢 Ready" : "🔴 Not Ready"}</p>
 						<p>Remote Streams: {remoteStreams.length}</p>
+						<p>Active Consumers: {consumersRef.current.length}</p>
 					</div>
 				</CardContent>
 			</Card>
