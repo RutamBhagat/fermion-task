@@ -13,12 +13,15 @@
 		"dotenv": "^16.4.7",
 		"zod": "^4.0.2",
 		"hono": "^4.8.2",
-		"@hono/node-server": "^1.14.4"
+		"@hono/node-server": "^1.14.4",
+		"mediasoup": "^3.16.8",
+		"socket.io": "^4.8.1"
 	},
 	"devDependencies": {
 		"tsdown": "^0.12.9",
 		"typescript": "^5.8.2",
 		"tsx": "^4.19.2",
-		"@types/node": "^22.13.11"
+		"@types/node": "^22.13.11",
+		"@types/socket.io": "^3.0.2"
 	}
 }
