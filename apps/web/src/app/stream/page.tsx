@@ -7,18 +7,8 @@ import type {
 	IceParameters,
 	Producer,
 	RtpCapabilities,
-	RtpParameters,
 	Transport,
 } from "mediasoup-client/types";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { io, type Socket } from "socket.io-client";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-
-// Type definitions
-interface RtpCapabilitiesResponse {
-	rtpCapabilities: RtpCapabilities;
-}
 
 interface TransportParams {
 	params: {
@@ -29,84 +19,115 @@ interface TransportParams {
 	};
 }
 
-interface ProducerResponse {
-	id: string;
-}
-
-interface ConsumerParams {
-	params: {
-		id: string;
-		producerId: string;
-		kind: "video" | "audio";
-		rtpParameters: RtpParameters;
-	};
-}
+import { useEffect, useRef, useState } from "react";
+import { io, type Socket } from "socket.io-client";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export default function StreamPage() {
-	const [socket, setSocket] = useState<Socket | null>(null);
-	const [device, setDevice] = useState<Device | null>(null);
 	const [isConnected, setIsConnected] = useState(false);
 	const [isProducing, setIsProducing] = useState(false);
 	const [status, setStatus] = useState("Connecting to server...");
-	const [remoteStreams, setRemoteStreams] = useState<MediaStream[]>([]);
+	const [remoteStreams, _setRemoteStreams] = useState<MediaStream[]>([]);
 
 	const localVideoRef = useRef<HTMLVideoElement>(null);
 	const remoteVideoRef = useRef<HTMLVideoElement>(null);
 	const localStreamRef = useRef<MediaStream | null>(null);
+	const socketRef = useRef<Socket | null>(null);
+	const deviceRef = useRef<Device | null>(null);
 	const transportRef = useRef<Transport | null>(null);
 	const producerRef = useRef<Producer | null>(null);
 
-	const cleanup = useCallback(() => {
-		if (localStreamRef.current) {
-			localStreamRef.current.getTracks().forEach((track) => track.stop());
-		}
-		if (socket) {
-			socket.disconnect();
-		}
-		if (transportRef.current) {
-			transportRef.current.close();
-		}
-	}, [socket]);
+	useEffect(() => {
+		let mounted = true;
 
-	const initializeDevice = useCallback(async (socketConnection: Socket) => {
-		try {
-			// Get RTP capabilities from server
-			const { rtpCapabilities } = await new Promise<RtpCapabilitiesResponse>(
-				(resolve) => {
-					socketConnection.emit("getRtpCapabilities", resolve);
-				},
-			);
+		const initializeConnection = async () => {
+			try {
+				// Connect to Socket.IO server
+				const socket = io(
+					process.env.NEXT_PUBLIC_SERVER_URL || "http://localhost:3000",
+				);
+				socketRef.current = socket;
 
-			// Create Mediasoup device
-			const newDevice = new Device();
-			await newDevice.load({ routerRtpCapabilities: rtpCapabilities });
-			setDevice(newDevice);
+				socket.on("connect", async () => {
+					if (!mounted) return;
+					setIsConnected(true);
+					setStatus("Connected to server");
 
-			// Get user media
-			const stream = await navigator.mediaDevices.getUserMedia({
-				video: true,
-				audio: true,
-			});
+					try {
+						// Get RTP capabilities
+						const { rtpCapabilities } = await new Promise<{
+							rtpCapabilities: RtpCapabilities;
+						}>((resolve) => {
+							socket.emit("getRtpCapabilities", resolve);
+						});
 
-			localStreamRef.current = stream;
-			if (localVideoRef.current) {
-				localVideoRef.current.srcObject = stream;
+						// Create device
+						const device = new Device();
+						await device.load({ routerRtpCapabilities: rtpCapabilities });
+						deviceRef.current = device;
+
+						// Get user media
+						const stream = await navigator.mediaDevices.getUserMedia({
+							video: true,
+							audio: true,
+						});
+
+						localStreamRef.current = stream;
+						if (localVideoRef.current && mounted) {
+							localVideoRef.current.srcObject = stream;
+						}
+
+						setStatus("Ready to stream");
+					} catch (error) {
+						console.error("Failed to initialize:", error);
+						setStatus("Error: Setup failed");
+					}
+				});
+
+				socket.on("disconnect", () => {
+					if (!mounted) return;
+					setIsConnected(false);
+					setStatus("Disconnected from server");
+				});
+
+				socket.on("newProducer", async ({ producerId, socketId }) => {
+					console.log("New producer available:", producerId, socketId);
+					// Simplified - just log for now
+				});
+			} catch (error) {
+				console.error("Failed to connect:", error);
+				setStatus("Failed to connect to server");
 			}
+		};
 
-			setStatus("Ready to stream");
-		} catch (error) {
-			console.error("Failed to initialize device:", error);
-			setStatus("Error: Camera/microphone access denied");
-		}
+		initializeConnection();
+
+		return () => {
+			mounted = false;
+			if (localStreamRef.current) {
+				localStreamRef.current.getTracks().forEach((track) => track.stop());
+			}
+			if (socketRef.current) {
+				socketRef.current.disconnect();
+			}
+			if (transportRef.current) {
+				transportRef.current.close();
+			}
+		};
 	}, []);
 
 	const startProducing = async () => {
-		if (!socket || !device || !localStreamRef.current) return;
+		const socket = socketRef.current;
+		const device = deviceRef.current;
+		const localStream = localStreamRef.current;
+
+		if (!socket || !device || !localStream) return;
 
 		try {
 			setStatus("Creating transport...");
 
-			// Create WebRTC transport
+			// Create transport
 			const { params } = await new Promise<TransportParams>((resolve) => {
 				socket.emit("createWebRtcTransport", {}, resolve);
 			});
@@ -119,7 +140,7 @@ export default function StreamPage() {
 			});
 
 			transport.on("produce", async (parameters, callback) => {
-				const { id } = await new Promise<ProducerResponse>((resolve) => {
+				const { id } = await new Promise<{ id: string }>((resolve) => {
 					socket.emit(
 						"produce",
 						{
@@ -133,7 +154,7 @@ export default function StreamPage() {
 			});
 
 			// Produce video
-			const videoTrack = localStreamRef.current.getVideoTracks()[0];
+			const videoTrack = localStream.getVideoTracks()[0];
 			if (videoTrack) {
 				const producer = await transport.produce({ track: videoTrack });
 				producerRef.current = producer;
@@ -145,107 +166,6 @@ export default function StreamPage() {
 			setStatus("Failed to start streaming");
 		}
 	};
-
-	const consumeMedia = useCallback(
-		async (socketConnection: Socket, producerSocketId: string) => {
-			if (!device) return;
-
-			try {
-				// Create receive transport (simplified - reusing send transport for demo)
-				const { params } = await new Promise<TransportParams>((resolve) => {
-					socketConnection.emit("createWebRtcTransport", {}, resolve);
-				});
-
-				const receiveTransport = device.createRecvTransport(params);
-
-				receiveTransport.on("connect", async ({ dtlsParameters }, callback) => {
-					socketConnection.emit(
-						"connectTransport",
-						{ dtlsParameters },
-						callback,
-					);
-				});
-
-				// Consume the media
-				const { params: consumerParams } = await new Promise<ConsumerParams>(
-					(resolve) => {
-						socketConnection.emit(
-							"consume",
-							{
-								producerSocketId,
-								rtpCapabilities: device.rtpCapabilities,
-							},
-							resolve,
-						);
-					},
-				);
-
-				const consumer = await receiveTransport.consume(consumerParams);
-
-				// Resume consumer
-				await new Promise<void>((resolve) => {
-					socketConnection.emit(
-						"resume",
-						{ producerId: consumerParams.producerId },
-						resolve,
-					);
-				});
-
-				// Add remote stream
-				const stream = new MediaStream([consumer.track]);
-				setRemoteStreams((prev) => [...prev, stream]);
-
-				if (remoteVideoRef.current && remoteStreams.length === 0) {
-					remoteVideoRef.current.srcObject = stream;
-				}
-			} catch (error) {
-				console.error("Failed to consume media:", error);
-			}
-		},
-		[device, remoteStreams.length],
-	);
-
-	const initializeMediasoup = useCallback(async () => {
-		try {
-			// Connect to Socket.IO server
-			const socketConnection = io(
-				process.env.NEXT_PUBLIC_SERVER_URL || "http://localhost:3000",
-			);
-			setSocket(socketConnection);
-
-			socketConnection.on("connect", () => {
-				setIsConnected(true);
-				setStatus("Connected to server");
-				initializeDevice(socketConnection);
-			});
-
-			socketConnection.on("disconnect", () => {
-				setIsConnected(false);
-				setStatus("Disconnected from server");
-			});
-
-			socketConnection.on("newProducer", async ({ producerId, socketId }) => {
-				console.log("New producer available:", producerId, socketId);
-				await consumeMedia(socketConnection, socketId);
-			});
-
-			socketConnection.on("producerClosed", ({ socketId }) => {
-				console.log("Producer closed:", socketId);
-				// Remove remote stream for this producer
-				setRemoteStreams((prev) =>
-					prev.filter((stream) => stream.id !== socketId),
-				);
-			});
-		} catch (error) {
-			console.error("Failed to initialize Mediasoup:", error);
-			setStatus("Failed to connect to server");
-		}
-	}, [consumeMedia, initializeDevice]);
-
-	useEffect(() => {
-		initializeMediasoup();
-		return cleanup;
-	}, [cleanup, initializeMediasoup]);
 
 	return (
 		<div className="container mx-auto space-y-6 p-4">
@@ -294,7 +214,7 @@ export default function StreamPage() {
 					<div className="flex gap-4">
 						<Button
 							onClick={startProducing}
-							disabled={!device || isProducing}
+							disabled={!deviceRef.current || isProducing}
 							className="flex-1"
 						>
 							{isProducing ? "Streaming..." : "Start Stream"}
@@ -306,7 +226,7 @@ export default function StreamPage() {
 							Connection Status:{" "}
 							{isConnected ? "🟢 Connected" : "🔴 Disconnected"}
 						</p>
-						<p>Device Ready: {device ? "🟢 Yes" : "🔴 No"}</p>
+						<p>Device Ready: {deviceRef.current ? "🟢 Yes" : "🔴 No"}</p>
 						<p>Producing: {isProducing ? "🟢 Yes" : "🔴 No"}</p>
 						<p>Remote Streams: {remoteStreams.length}</p>
 					</div>
