@@ -21,7 +21,6 @@
 		"tsdown": "^0.12.9",
 		"typescript": "^5.8.2",
 		"tsx": "^4.19.2",
-		"@types/node": "^22.13.11",
-		"@types/socket.io": "^3.0.2"
+		"@types/node": "^22.13.11"
 	}
 }
