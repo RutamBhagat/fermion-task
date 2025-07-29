@@ -198,37 +198,44 @@ io.on("connection", (socket) => {
 				return;
 			}
 
-			// Find the first available producer (we'll improve this logic later)
-			const producer = producerList.find(p => 
+			// Find all consumable producers (both audio and video)
+			const consumableProducers = producerList.filter(p => 
 				router.canConsume({
 					producerId: p.id,
 					rtpCapabilities: data.rtpCapabilities,
 				})
 			);
 
-			if (!producer) {
-				callback({ error: "No consumable producer found" });
+			if (consumableProducers.length === 0) {
+				callback({ error: "No consumable producers found" });
 				return;
 			}
 
-			const consumer = await transport.consume({
-				producerId: producer.id,
-				rtpCapabilities: data.rtpCapabilities,
-				paused: true,
-				appData: { socketId: socket.id },
-			});
+			// Create consumers for all available producers (audio + video)
+			const consumerParams = [];
+			
+			for (const producer of consumableProducers) {
+				const consumer = await transport.consume({
+					producerId: producer.id,
+					rtpCapabilities: data.rtpCapabilities,
+					paused: true,
+					appData: { socketId: socket.id, producerSocketId: data.producerSocketId },
+				});
 
-			// Store consumer by its ID for easier lookup
-			consumers.set(consumer.id, consumer);
+				// Store consumer by its ID for easier lookup
+				consumers.set(consumer.id, consumer);
 
-			callback({
-				params: {
+				consumerParams.push({
 					id: consumer.id,
 					producerId: producer.id,
 					kind: consumer.kind,
 					rtpParameters: consumer.rtpParameters,
-				},
-			});
+				});
+
+				console.log(`Created consumer for ${consumer.kind} track:`, consumer.id);
+			}
+
+			callback({ params: consumerParams });
 		} catch (error) {
 			console.error("Error consuming:", error);
 			callback({

@@ -247,21 +247,21 @@ export default function StreamPage() {
 		}
 	};
 
-	const createConsumer = async (producerId: string, socketId: string) => {
+	const createConsumer = async (_producerId: string, socketId: string) => {
 		const socket = socketRef.current;
 		const device = deviceRef.current;
 
 		if (!socket || !device || !consumerTransportRef.current) return;
 
 		try {
-			// Create consumer
-			const { params: consumerParams } = await new Promise<{
-				params: {
+			// Create consumers for all tracks (audio + video)
+			const { params: consumerParamsArray } = await new Promise<{
+				params: Array<{
 					id: string;
 					producerId: string;
 					kind: "audio" | "video";
 					rtpParameters: any;
-				};
+				}>;
 			}>((resolve) => {
 				socket.emit(
 					"consume",
@@ -273,25 +273,28 @@ export default function StreamPage() {
 				);
 			});
 
-			const consumer = await consumerTransportRef.current.consume({
-				id: consumerParams.id,
-				producerId: consumerParams.producerId,
-				kind: consumerParams.kind,
-				rtpParameters: consumerParams.rtpParameters,
-			});
+			// Create consumers for each track
+			for (const consumerParams of consumerParamsArray) {
+				const consumer = await consumerTransportRef.current.consume({
+					id: consumerParams.id,
+					producerId: consumerParams.producerId,
+					kind: consumerParams.kind,
+					rtpParameters: consumerParams.rtpParameters,
+				});
 
-			// Resume consumer
-			await new Promise<void>((resolve) => {
-				socket.emit("resume", { consumerId: consumer.id }, resolve);
-			});
+				// Resume consumer
+				await new Promise<void>((resolve) => {
+					socket.emit("resume", { consumerId: consumer.id }, resolve);
+				});
 
-			// Add consumer to list
-			consumersRef.current.push(consumer);
+				// Add consumer to list
+				consumersRef.current.push(consumer);
 
-			// Update or create media stream
+				console.log("Consumer created:", consumer.id, "for producer:", consumerParams.producerId, "kind:", consumerParams.kind);
+			}
+
+			// Update remote stream with all tracks
 			updateRemoteStream();
-
-			console.log("Consumer created:", consumer.id, "for producer:", producerId, "kind:", consumerParams.kind);
 		} catch (error) {
 			console.error("Failed to create consumer:", error);
 		}
