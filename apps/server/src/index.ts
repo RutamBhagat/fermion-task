@@ -33,9 +33,9 @@ const io = new Server(server, {
 // Mediasoup Worker and Router
 let worker: mediasoup.types.Worker;
 let router: mediasoup.types.Router;
-const transports = new Map();
-const producers = new Map();
-const consumers = new Map();
+const transports = new Map(); // socket.id -> {producer?: Transport, consumer?: Transport}
+const producers = new Map(); // socket.id -> Producer[]
+const consumers = new Map(); // consumerId -> Consumer
 
 // Initialize Mediasoup
 async function initMediasoup() {
@@ -76,7 +76,7 @@ io.on("connection", (socket) => {
 		callback({ rtpCapabilities });
 	});
 
-	socket.on("createWebRtcTransport", async (_data, callback) => {
+	socket.on("createWebRtcTransport", async (data, callback) => {
 		try {
 			const transport = await router.createWebRtcTransport({
 				listenIps: [
@@ -90,7 +90,12 @@ io.on("connection", (socket) => {
 				preferUdp: true,
 			});
 
-			transports.set(socket.id, transport);
+			// Store transport by type (producer or consumer)
+			if (!transports.has(socket.id)) {
+				transports.set(socket.id, {});
+			}
+			const transportType = data?.type || 'producer';
+			transports.get(socket.id)[transportType] = transport;
 
 			callback({
 				params: {
@@ -110,7 +115,27 @@ io.on("connection", (socket) => {
 
 	socket.on("connectTransport", async (data, callback) => {
 		try {
-			const transport = transports.get(socket.id);
+			const transportsForSocket = transports.get(socket.id);
+			if (!transportsForSocket) {
+				throw new Error('No transports found for socket');
+			}
+			
+			// Find the transport by ID
+			const transport = Object.values(transportsForSocket).find(
+				t => t && t.id === data.transportId
+			);
+			
+			if (!transport) {
+				throw new Error('Transport not found');
+			}
+			
+			// Check if already connected
+			if (transport.dtlsState !== 'new') {
+				console.log('Transport already connected, skipping');
+				callback();
+				return;
+			}
+			
 			await transport.connect({ dtlsParameters: data.dtlsParameters });
 			callback();
 		} catch (error) {
@@ -123,13 +148,23 @@ io.on("connection", (socket) => {
 
 	socket.on("produce", async (data, callback) => {
 		try {
-			const transport = transports.get(socket.id);
+			const transportsForSocket = transports.get(socket.id);
+			const transport = transportsForSocket?.producer;
+			
+			if (!transport) {
+				throw new Error('Producer transport not found');
+			}
+			
 			const producer = await transport.produce({
 				kind: data.kind,
 				rtpParameters: data.rtpParameters,
 			});
 
-			producers.set(socket.id, producer);
+			// Initialize producers array for this socket if it doesn't exist
+			if (!producers.has(socket.id)) {
+				producers.set(socket.id, []);
+			}
+			producers.get(socket.id).push(producer);
 
 			// Notify other clients about new producer
 			socket.broadcast.emit("newProducer", {
@@ -148,11 +183,31 @@ io.on("connection", (socket) => {
 
 	socket.on("consume", async (data, callback) => {
 		try {
-			const transport = transports.get(socket.id);
-			const producer = producers.get(data.producerSocketId);
+			const transportsForSocket = transports.get(socket.id);
+			const transport = transportsForSocket?.consumer;
+			
+			if (!transport) {
+				callback({ error: "Consumer transport not found" });
+				return;
+			}
+			
+			const producerList = producers.get(data.producerSocketId);
+
+			if (!producerList || producerList.length === 0) {
+				callback({ error: "No producers found for socket" });
+				return;
+			}
+
+			// Find the first available producer (we'll improve this logic later)
+			const producer = producerList.find(p => 
+				router.canConsume({
+					producerId: p.id,
+					rtpCapabilities: data.rtpCapabilities,
+				})
+			);
 
 			if (!producer) {
-				callback({ error: "Producer not found" });
+				callback({ error: "No consumable producer found" });
 				return;
 			}
 
@@ -160,9 +215,11 @@ io.on("connection", (socket) => {
 				producerId: producer.id,
 				rtpCapabilities: data.rtpCapabilities,
 				paused: true,
+				appData: { socketId: socket.id },
 			});
 
-			consumers.set(`${socket.id}-${producer.id}`, consumer);
+			// Store consumer by its ID for easier lookup
+			consumers.set(consumer.id, consumer);
 
 			callback({
 				params: {
@@ -182,8 +239,16 @@ io.on("connection", (socket) => {
 
 	socket.on("resume", async (data, callback) => {
 		try {
-			const consumer = consumers.get(`${socket.id}-${data.producerId}`);
-			await consumer.resume();
+			const consumer = consumers.get(data.consumerId);
+			
+			if (!consumer) {
+				throw new Error(`Consumer not found: ${data.consumerId}`);
+			}
+			
+			if (consumer.paused) {
+				await consumer.resume();
+			}
+			
 			callback();
 		} catch (error) {
 			console.error("Error resuming consumer:", error);
@@ -196,17 +261,47 @@ io.on("connection", (socket) => {
 	socket.on("disconnect", () => {
 		console.log(`Client disconnected: ${socket.id}`);
 		// Clean up resources
-		const transport = transports.get(socket.id);
-		const producer = producers.get(socket.id);
+		const transportsForSocket = transports.get(socket.id);
+		const producerList = producers.get(socket.id);
 
-		if (transport) transport.close();
-		if (producer) producer.close();
+		if (transportsForSocket) {
+			if (transportsForSocket.producer) transportsForSocket.producer.close();
+			if (transportsForSocket.consumer) transportsForSocket.consumer.close();
+		}
+		
+		if (producerList) {
+			producerList.forEach(producer => producer.close());
+		}
+
+		// Clean up consumers for this socket
+		for (const [consumerId, consumer] of consumers) {
+			if (consumer.appData?.socketId === socket.id) {
+				consumer.close();
+				consumers.delete(consumerId);
+			}
+		}
 
 		transports.delete(socket.id);
 		producers.delete(socket.id);
 
 		// Notify other clients
 		socket.broadcast.emit("producerClosed", { socketId: socket.id });
+	});
+
+	// Send existing producers to new client
+	socket.on("getProducers", (callback) => {
+		const existingProducers = [];
+		producers.forEach((producerList, socketId) => {
+			if (socketId !== socket.id) {
+				producerList.forEach(producer => {
+					existingProducers.push({
+						producerId: producer.id,
+						socketId: socketId,
+					});
+				});
+			}
+		});
+		callback(existingProducers);
 	});
 });
 

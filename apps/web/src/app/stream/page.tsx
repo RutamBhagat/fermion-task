@@ -38,7 +38,7 @@ export default function StreamPage() {
 	const deviceRef = useRef<Device | null>(null);
 	const producerTransportRef = useRef<Transport | null>(null);
 	const consumerTransportRef = useRef<Transport | null>(null);
-	const producerRef = useRef<Producer | null>(null);
+	const producersRef = useRef<Producer[]>([]);
 	const consumersRef = useRef<Consumer[]>([]);
 
 	useEffect(() => {
@@ -82,6 +82,21 @@ export default function StreamPage() {
 						}
 
 						setStatus("Ready to stream");
+						
+						// Create consumer transport immediately after device setup
+						await createConsumerTransport();
+
+						// Get existing producers
+						const existingProducers = await new Promise<
+							Array<{ producerId: string; socketId: string }>
+						>((resolve) => {
+							socket.emit("getProducers", resolve);
+						});
+
+						// Consume existing producers
+						for (const { producerId, socketId } of existingProducers) {
+							await createConsumer(producerId, socketId);
+						}
 					} catch (error) {
 						console.error("Failed to initialize:", error);
 						setStatus("Error: Setup failed");
@@ -152,16 +167,19 @@ export default function StreamPage() {
 		try {
 			setStatus("Creating transport...");
 
-			// Create transport
+			// Create producer transport
 			const { params } = await new Promise<TransportParams>((resolve) => {
-				socket.emit("createWebRtcTransport", {}, resolve);
+				socket.emit("createWebRtcTransport", { type: 'producer' }, resolve);
 			});
 
 			const transport = device.createSendTransport(params);
 			producerTransportRef.current = transport;
 
 			transport.on("connect", async ({ dtlsParameters }, callback) => {
-				socket.emit("connectTransport", { dtlsParameters }, callback);
+				socket.emit("connectTransport", { 
+					transportId: transport.id,
+					dtlsParameters 
+				}, callback);
 			});
 
 			transport.on("produce", async (parameters, callback) => {
@@ -181,10 +199,20 @@ export default function StreamPage() {
 			// Produce video
 			const videoTrack = localStream.getVideoTracks()[0];
 			if (videoTrack) {
-				const producer = await transport.produce({ track: videoTrack });
-				producerRef.current = producer;
+				const videoProducer = await transport.produce({ track: videoTrack });
+				producersRef.current.push(videoProducer);
+			}
+
+			// Produce audio
+			const audioTrack = localStream.getAudioTracks()[0];
+			if (audioTrack) {
+				const audioProducer = await transport.produce({ track: audioTrack });
+				producersRef.current.push(audioProducer);
+			}
+
+			if (producersRef.current.length > 0) {
 				setIsProducing(true);
-				setStatus("Streaming video");
+				setStatus("Streaming video and audio");
 			}
 		} catch (error) {
 			console.error("Failed to start producing:", error);
@@ -192,27 +220,40 @@ export default function StreamPage() {
 		}
 	};
 
+	const createConsumerTransport = async () => {
+		const socket = socketRef.current;
+		const device = deviceRef.current;
+
+		if (!socket || !device || consumerTransportRef.current) return;
+
+		try {
+			const { params } = await new Promise<TransportParams>((resolve) => {
+				socket.emit("createWebRtcTransport", { type: 'consumer' }, resolve);
+			});
+
+			const consumerTransport = device.createRecvTransport(params);
+			consumerTransportRef.current = consumerTransport;
+
+			consumerTransport.on("connect", async ({ dtlsParameters }, callback) => {
+				socket.emit("connectTransport", { 
+					transportId: consumerTransport.id,
+					dtlsParameters 
+				}, callback);
+			});
+
+			console.log("Consumer transport created");
+		} catch (error) {
+			console.error("Failed to create consumer transport:", error);
+		}
+	};
+
 	const createConsumer = async (producerId: string, socketId: string) => {
 		const socket = socketRef.current;
 		const device = deviceRef.current;
 
-		if (!socket || !device) return;
+		if (!socket || !device || !consumerTransportRef.current) return;
 
 		try {
-			// Create consumer transport if not exists
-			if (!consumerTransportRef.current) {
-				const { params } = await new Promise<TransportParams>((resolve) => {
-					socket.emit("createWebRtcTransport", {}, resolve);
-				});
-
-				const consumerTransport = device.createRecvTransport(params);
-				consumerTransportRef.current = consumerTransport;
-
-				consumerTransport.on("connect", async ({ dtlsParameters }, callback) => {
-					socket.emit("connectTransport", { dtlsParameters }, callback);
-				});
-			}
-
 			// Create consumer
 			const { params: consumerParams } = await new Promise<{
 				params: {
@@ -232,7 +273,7 @@ export default function StreamPage() {
 				);
 			});
 
-			const consumer = await consumerTransportRef.current!.consume({
+			const consumer = await consumerTransportRef.current.consume({
 				id: consumerParams.id,
 				producerId: consumerParams.producerId,
 				kind: consumerParams.kind,
@@ -241,24 +282,33 @@ export default function StreamPage() {
 
 			// Resume consumer
 			await new Promise<void>((resolve) => {
-				socket.emit("resume", { producerId }, resolve);
+				socket.emit("resume", { consumerId: consumer.id }, resolve);
 			});
 
 			// Add consumer to list
 			consumersRef.current.push(consumer);
 
-			// Create media stream and display
-			const stream = new MediaStream([consumer.track]);
-			setRemoteStreams((prev) => [...prev, stream]);
+			// Update or create media stream
+			updateRemoteStream();
 
-			// Display in remote video element
-			if (remoteVideoRef.current) {
-				remoteVideoRef.current.srcObject = stream;
-			}
-
-			console.log("Consumer created for producer:", producerId);
+			console.log("Consumer created:", consumer.id, "for producer:", producerId, "kind:", consumerParams.kind);
 		} catch (error) {
 			console.error("Failed to create consumer:", error);
+		}
+	};
+
+	const updateRemoteStream = () => {
+		if (consumersRef.current.length === 0) return;
+
+		// Combine all consumer tracks into one stream
+		const tracks = consumersRef.current.map(consumer => consumer.track);
+		const combinedStream = new MediaStream(tracks);
+
+		setRemoteStreams([combinedStream]);
+
+		// Display in remote video element
+		if (remoteVideoRef.current) {
+			remoteVideoRef.current.srcObject = combinedStream;
 		}
 	};
 
@@ -328,7 +378,7 @@ export default function StreamPage() {
 							{isConnected ? "🟢 Connected" : "🔴 Disconnected"}
 						</p>
 						<p>Device Ready: {deviceRef.current ? "🟢 Yes" : "🔴 No"}</p>
-						<p>Producing: {isProducing ? "🟢 Yes" : "🔴 No"}</p>
+						<p>Producing: {isProducing ? "🟢 Yes" : "🔴 No"} ({producersRef.current.length} tracks)</p>
 						<p>Consumer Transport: {consumerTransportRef.current ? "🟢 Ready" : "🔴 Not Ready"}</p>
 						<p>Remote Streams: {remoteStreams.length}</p>
 						<p>Active Consumers: {consumersRef.current.length}</p>
