@@ -576,13 +576,11 @@ async function createCompositeHLSStream(
 	audioProducers: mediasoup.types.Producer[],
 	videoProducers: mediasoup.types.Producer[],
 	socketId: string,
+	router: mediasoup.types.Router, // Pass the correct router
 ) {
 	if (audioProducers.length === 0 && videoProducers.length === 0) {
 		throw new Error("At least one producer (audio or video) is required");
 	}
-
-	// Use legacy router for HLS streaming (we need a router reference)
-	const router = legacyRouter;
 
 	// Create stream directory
 	const streamDir = `${HLS_DIR}/${streamId}`;
@@ -860,286 +858,6 @@ async function createCompositeHLSStream(
 	}, 3000); // Wait 3 seconds for FFmpeg to start generating files
 
 	console.log(`Composite HLS stream created for ${streamId}`);
-	return { streamId, hlsUrl: `/hls/${streamId}/stream.m3u8` };
-}
-
-async function _createHLSStream(
-	streamId: string,
-	audioProducer?: mediasoup.types.Producer,
-	videoProducer?: mediasoup.types.Producer,
-) {
-	if (!audioProducer && !videoProducer) {
-		throw new Error("At least one producer (audio or video) is required");
-	}
-
-	// Use legacy router for HLS streaming
-	const router = legacyRouter;
-
-	// Create stream directory
-	const streamDir = `${HLS_DIR}/${streamId}`;
-	if (!existsSync(streamDir)) {
-		mkdirSync(streamDir, { recursive: true });
-	}
-
-	// Allocate ports for FFmpeg to listen on
-	const availablePorts = getAvailablePorts(20000, 4); // Start from 20000 to avoid conflicts
-	let audioRtpPort: number | undefined;
-	let audioRtcpPort: number | undefined;
-	let videoRtpPort: number | undefined;
-	let videoRtcpPort: number | undefined;
-	let portIndex = 0;
-
-	if (audioProducer) {
-		audioRtpPort = availablePorts[portIndex++];
-		audioRtcpPort = availablePorts[portIndex++];
-	}
-	if (videoProducer) {
-		videoRtpPort = availablePorts[portIndex++];
-		videoRtcpPort = availablePorts[portIndex++];
-	}
-
-	// We'll build FFmpeg command after creating SDP file
-
-	// Now create PlainTransports and connect them to FFmpeg
-	let audioTransport: mediasoup.types.PlainTransport | undefined;
-	let videoTransport: mediasoup.types.PlainTransport | undefined;
-	let audioConsumer: mediasoup.types.Consumer | undefined;
-	let videoConsumer: mediasoup.types.Consumer | undefined;
-
-	if (audioProducer && audioRtpPort && audioRtcpPort) {
-		audioTransport = await router.createPlainTransport({
-			listenIp: { ip: "127.0.0.1" },
-			rtcpMux: false,
-			comedia: false, // We will connect TO FFmpeg
-		});
-
-		// Create consumer for audio (paused initially)
-		if (audioTransport) {
-			audioConsumer = await audioTransport.consume({
-				producerId: audioProducer.id,
-				rtpCapabilities: router.rtpCapabilities,
-				paused: true, // Start paused to avoid timing issues
-			});
-
-			// Connect transport to FFmpeg's listening ports
-			await audioTransport.connect({
-				ip: "127.0.0.1",
-				port: audioRtpPort,
-				rtcpPort: audioRtcpPort,
-			});
-			console.log(
-				`Audio PlainTransport connected to FFmpeg on ports ${audioRtpPort}/${audioRtcpPort}`,
-			);
-			console.log(
-				"Audio Consumer RTP Parameters:",
-				JSON.stringify(audioConsumer.rtpParameters, null, 2),
-			);
-		}
-	}
-
-	if (videoProducer && videoRtpPort && videoRtcpPort) {
-		videoTransport = await router.createPlainTransport({
-			listenIp: { ip: "127.0.0.1" },
-			rtcpMux: false,
-			comedia: false, // We will connect TO FFmpeg
-		});
-
-		// Create consumer for video (paused initially)
-		if (videoTransport) {
-			videoConsumer = await videoTransport.consume({
-				producerId: videoProducer.id,
-				rtpCapabilities: router.rtpCapabilities,
-				paused: true, // Start paused to avoid timing issues
-			});
-
-			// Connect transport to FFmpeg's listening ports
-			await videoTransport.connect({
-				ip: "127.0.0.1",
-				port: videoRtpPort,
-				rtcpPort: videoRtcpPort,
-			});
-			console.log(
-				`Video PlainTransport connected to FFmpeg on ports ${videoRtpPort}/${videoRtcpPort}`,
-			);
-			console.log(
-				"Video Consumer RTP Parameters:",
-				JSON.stringify(videoConsumer.rtpParameters, null, 2),
-			);
-		}
-	}
-
-	// Create SDP file for FFmpeg
-	const sdpContent = generateSDP(
-		audioConsumer,
-		videoConsumer,
-		audioRtpPort,
-		videoRtpPort,
-	);
-	const sdpPath = `${streamDir}/stream.sdp`;
-	const fs = await import("node:fs/promises");
-	await fs.writeFile(sdpPath, sdpContent);
-	console.log(`SDP file created at ${sdpPath}`);
-	console.log(`SDP Content:\n${sdpContent}`);
-
-	// Now build and start FFmpeg with SDP file input
-	const ffmpegArgs = [
-		"-y",
-		"-loglevel",
-		"debug",
-		"-protocol_whitelist",
-		"file,rtp,udp",
-		"-f",
-		"sdp",
-		"-i",
-		sdpPath,
-	];
-
-	// Add encoding options optimized for H.264 stream copying
-	if (videoProducer && audioProducer) {
-		// Both audio and video - use stream copying for H.264
-		ffmpegArgs.push(
-			"-c:v",
-			"copy", // Copy H.264 stream instead of transcoding
-			"-bf",
-			"0", // No B-frames
-			"-c:a",
-			"aac",
-			"-b:a",
-			"128k",
-			"-avoid_negative_ts",
-			"make_zero",
-			"-fflags",
-			"+genpts", // Generate timestamps
-			"-vsync",
-			"0", // Don't force frame rate
-			"-async",
-			"1", // Audio sync
-		);
-	} else if (videoProducer) {
-		// Video only - copy H.264 stream
-		ffmpegArgs.push(
-			"-c:v",
-			"copy",
-			"-bf",
-			"0",
-			"-avoid_negative_ts",
-			"make_zero",
-			"-fflags",
-			"+genpts",
-			"-vsync",
-			"0",
-		);
-	} else if (audioProducer) {
-		// Audio only
-		ffmpegArgs.push("-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2");
-	}
-
-	// Add HLS options optimized for stability
-	ffmpegArgs.push(
-		"-f",
-		"hls",
-		"-hls_time",
-		"2", // Shorter segments for lower latency
-		"-hls_list_size",
-		"6", // Keep more segments for buffering
-		"-hls_flags",
-		"delete_segments+omit_endlist", // Live streaming flags
-		"-hls_segment_type",
-		"mpegts",
-		"-hls_allow_cache",
-		"0",
-		"-start_number",
-		"0",
-		`${streamDir}/stream.m3u8`,
-	);
-
-	console.log(`Starting FFmpeg with SDP input: ${ffmpegArgs.join(" ")}`);
-
-	// Start FFmpeg process with SDP file
-	const ffmpegProcess = spawn("ffmpeg", ffmpegArgs, {
-		stdio: ["ignore", "pipe", "pipe"],
-	});
-
-	ffmpegProcess.stdout?.on("data", (data: Buffer) => {
-		console.log(`FFmpeg stdout [${streamId}]: ${data}`);
-	});
-
-	// Stream health monitoring
-	let droppedFrames = 0;
-	let duplicatedFrames = 0;
-	let lastHealthCheck = Date.now();
-
-	ffmpegProcess.stderr?.on("data", (data: Buffer) => {
-		const output = data.toString();
-		console.log(`FFmpeg stderr [${streamId}]: ${output}`);
-
-		// Monitor frame drops
-		const dropMatch = output.match(/dropping frame (\d+)/);
-		if (dropMatch) {
-			droppedFrames++;
-		}
-
-		// Monitor duplicated frames
-		const dupMatch = output.match(/dup=(\d+)/);
-		if (dupMatch) {
-			duplicatedFrames = Number.parseInt(dupMatch[1]);
-		}
-
-		// Health check every 30 seconds
-		const now = Date.now();
-		if (now - lastHealthCheck > 30000) {
-			console.log(
-				`Stream ${streamId} health: dropped=${droppedFrames}, duplicated=${duplicatedFrames}`,
-			);
-
-			// Auto-restart on excessive drops (more than 100 in 30 seconds)
-			if (droppedFrames > 100) {
-				console.warn(
-					`Restarting stream ${streamId} due to excessive frame drops (${droppedFrames})`,
-				);
-				// Note: Auto-restart would require additional logic to recreate the stream
-				// For now, just log the warning
-			}
-
-			// Reset counters
-			lastHealthCheck = now;
-			droppedFrames = 0;
-		}
-	});
-
-	ffmpegProcess.on("error", (error: Error) => {
-		console.error(`FFmpeg process error [${streamId}]:`, error);
-		hlsProcesses.delete(streamId);
-	});
-
-	ffmpegProcess.on("close", (code: number | null) => {
-		console.log(
-			`FFmpeg process for stream ${streamId} exited with code ${code}`,
-		);
-		hlsProcesses.delete(streamId);
-	});
-
-	// Give FFmpeg a moment to initialize, then resume consumers
-	setTimeout(async () => {
-		try {
-			if (audioConsumer?.paused) {
-				await audioConsumer.resume();
-				console.log(`Audio consumer resumed for stream ${streamId}`);
-			}
-			if (videoConsumer?.paused) {
-				await videoConsumer.resume();
-				console.log(`Video consumer resumed for stream ${streamId}`);
-			}
-		} catch (error) {
-			console.error(`Error resuming consumers for stream ${streamId}:`, error);
-		}
-	}, 2000); // Wait 2 seconds for FFmpeg to be ready
-
-	// Store references
-	plainTransports.set(streamId, { audioTransport, videoTransport });
-	hlsProcesses.set(streamId, ffmpegProcess);
-
-	console.log(`HLS stream created for ${streamId}`);
 	return { streamId, hlsUrl: `/hls/${streamId}/stream.m3u8` };
 }
 
@@ -1681,11 +1399,22 @@ io.on("connection", (socket) => {
 
 			console.log(`Creating HLS stream with ${validAudioProducers.length} audio and ${validVideoProducers.length} video producers`);
 
+			// Use the correct router for HLS streaming
+			let hlsRouter: mediasoup.types.Router;
+			if (roomId) {
+				// For room-based HLS, use the room's router
+				hlsRouter = roomState!.router;
+			} else {
+				// For legacy HLS, use the legacy router
+				hlsRouter = legacyRouter;
+			}
+
 			const result = await createCompositeHLSStream(
 				streamId,
 				validAudioProducers,
 				validVideoProducers,
 				socket.id,
+				hlsRouter,
 			);
 			callback(result);
 		} catch (error) {
