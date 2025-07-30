@@ -92,13 +92,40 @@ app.get("/watch/:streamId", (c) => {
 			function initializeHLS() {
 				if (Hls.isSupported()) {
 					const hls = new Hls({
-						// Optimized configuration for playback speed changes
-						maxLiveSyncPlaybackRate: 2.0,
+						// Live streaming configuration optimized for 1-second segments
 						lowLatencyMode: false,
-						maxBufferLength: 10,
+						liveSyncDurationCount: 3,        // Buffer 3 segments (3 seconds) from live edge
+						liveMaxLatencyDurationCount: 6,  // Max 6 seconds behind live edge
+						maxLiveSyncPlaybackRate: 2.0,    // Allow 2x speed
+						liveSyncOnStallIncrease: 1,      // Conservative stall recovery
+						
+						// Buffer management for live streaming
+						maxBufferLength: 15,             // Sufficient buffer for live streams
 						maxBufferHole: 0.5,
 						nudgeMaxRetry: 5,
-						liveSyncOnStallIncrease: 2
+						
+						// Startup optimization
+						initialLiveManifestSize: 3,      // Wait for 3 segments before starting
+						startOnSegmentBoundary: true,    // Cleaner live starts
+						
+						// Error recovery
+						appendErrorMaxRetry: 5,
+						fragLoadPolicy: {
+							default: {
+								maxTimeToFirstByteMs: 8000,
+								maxLoadTimeMs: 20000,
+								timeoutRetry: {
+									maxNumRetry: 4,
+									retryDelayMs: 0,
+									maxRetryDelayMs: 0,
+								},
+								errorRetry: {
+									maxNumRetry: 6,
+									retryDelayMs: 500,
+									maxRetryDelayMs: 4000,
+								},
+							},
+						}
 					});
 					
 					hls.on(Hls.Events.MANIFEST_PARSED, () => {
