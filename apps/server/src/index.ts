@@ -58,22 +58,97 @@ app.get("/watch/:streamId", (c) => {
 		<style>
 			body { margin: 0; padding: 20px; font-family: Arial, sans-serif; }
 			video { width: 100%; max-width: 800px; height: auto; }
+			.loading { 
+				background: #f0f0f0; 
+				padding: 20px; 
+				border-radius: 8px; 
+				text-align: center; 
+				margin: 20px 0;
+			}
+			.status { margin: 10px 0; color: #666; }
+			.error { color: #d32f2f; }
+			.success { color: #388e3c; }
 		</style>
 	</head>
 	<body>
 		<h1>Watching Stream: ${streamId}</h1>
-		<video id="video" controls autoplay muted></video>
+		<div id="status" class="loading">
+			<div>🔄 Initializing stream...</div>
+			<div class="status">Waiting for HLS playlist to be ready</div>
+		</div>
+		<video id="video" controls muted style="display: none;"></video>
 		<script>
 			const video = document.getElementById('video');
+			const status = document.getElementById('status');
 			const videoSrc = '${hlsUrl}';
 			
-			if (Hls.isSupported()) {
-				const hls = new Hls();
-				hls.loadSource(videoSrc);
-				hls.attachMedia(video);
-			} else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-				video.src = videoSrc;
+			let retryCount = 0;
+			const maxRetries = 15; // 30 seconds with 2s intervals
+			
+			function updateStatus(message, className = '') {
+				status.innerHTML = \`<div class="\${className}">\${message}</div>\`;
 			}
+			
+			function initializeHLS() {
+				if (Hls.isSupported()) {
+					const hls = new Hls({
+						// Optimized configuration for playback speed changes
+						maxLiveSyncPlaybackRate: 2.0,
+						lowLatencyMode: false,
+						maxBufferLength: 10,
+						maxBufferHole: 0.5,
+						nudgeMaxRetry: 5,
+						liveSyncOnStallIncrease: 2
+					});
+					
+					hls.on(Hls.Events.MANIFEST_PARSED, () => {
+						updateStatus('✅ Stream ready!', 'success');
+						status.style.display = 'none';
+						video.style.display = 'block';
+						video.play().catch(e => console.log('Autoplay prevented:', e));
+					});
+					
+					hls.on(Hls.Events.ERROR, (event, data) => {
+						console.warn('HLS Error:', data);
+						if (data.fatal) {
+							updateStatus(\`❌ Stream error: \${data.details}\`, 'error');
+						}
+					});
+					
+					hls.loadSource(videoSrc);
+					hls.attachMedia(video);
+				} else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+					video.src = videoSrc;
+					video.onloadedmetadata = () => {
+						updateStatus('✅ Stream ready!', 'success');
+						status.style.display = 'none';
+						video.style.display = 'block';
+					};
+				}
+			}
+			
+			function checkStreamAvailability() {
+				fetch(videoSrc)
+					.then(response => {
+						if (response.ok) {
+							initializeHLS();
+						} else {
+							throw new Error('Stream not ready');
+						}
+					})
+					.catch(() => {
+						retryCount++;
+						if (retryCount <= maxRetries) {
+							updateStatus(\`🔄 Waiting for stream... (attempt \${retryCount}/\${maxRetries})\`);
+							setTimeout(checkStreamAvailability, 2000);
+						} else {
+							updateStatus('❌ Stream failed to initialize. Please try starting HLS again.', 'error');
+						}
+					});
+			}
+			
+			// Start checking for stream availability
+			checkStreamAvailability();
 		</script>
 	</body>
 	</html>
@@ -475,14 +550,15 @@ async function createCompositeHLSStream(
 		);
 	}
 	
-	// Add HLS options for LIVE streaming
+	// Add HLS options optimized for faster startup and playback speed support
 	ffmpegArgs.push(
 		"-f", "hls",
-		"-hls_time", "2",
-		"-hls_list_size", "6",
-		"-hls_flags", "delete_segments+omit_endlist",
+		"-hls_time", "1",                    // Shorter segments for faster startup
+		"-hls_list_size", "12",              // More segments in playlist for better buffering
+		"-hls_flags", "delete_segments+omit_endlist+independent_segments",
 		"-hls_segment_type", "mpegts",
 		"-hls_allow_cache", "0",
+		"-hls_init_time", "0.5",            // First segment can be shorter for faster start
 		"-start_number", "0",
 		`${streamDir}/stream.m3u8`
 	);
