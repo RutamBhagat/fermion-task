@@ -172,10 +172,11 @@ export default function RoomPage() {
 					consumer.appData = {
 						...consumer.appData,
 						producerSocketId: socketId,
+						roomId: meetingId,
 					};
 
 					await new Promise<void>((resolve) => {
-						socket.emit("resume", { consumerId: consumer.id }, resolve);
+						socket.emit("resume", { consumerId: consumer.id, roomId: meetingId }, resolve);
 					});
 
 					consumersRef.current.push(consumer);

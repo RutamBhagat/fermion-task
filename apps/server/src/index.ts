@@ -1501,22 +1501,27 @@ io.on("connection", (socket) => {
 
 	socket.on("resume", async (data, callback) => {
 		try {
-			const { consumerId, roomId } = data;
-			let targetConsumers: Map<string, mediasoup.types.Consumer>;
-
-			if (roomId) {
-				const roomState = getRoomState(roomId);
-				if (!roomState) {
-					callback({ error: "Room not found" });
-					return;
+			const { consumerId } = data;
+			
+			// First try to find consumer in room states
+			let consumer: mediasoup.types.Consumer | undefined;
+			
+			// Search through all rooms first
+			for (const [roomId, roomState] of rooms) {
+				consumer = roomState.consumers.get(consumerId);
+				if (consumer) {
+					console.log(`Found consumer ${consumerId} in room ${roomId}`);
+					break;
 				}
-				targetConsumers = roomState.consumers;
-			} else {
-				// Legacy support
-				targetConsumers = legacyConsumers;
 			}
-
-			const consumer = targetConsumers.get(consumerId);
+			
+			// If not found in rooms, check legacy consumers
+			if (!consumer) {
+				consumer = legacyConsumers.get(consumerId);
+				if (consumer) {
+					console.log(`Found consumer ${consumerId} in legacy system`);
+				}
+			}
 
 			if (!consumer) {
 				throw new Error(`Consumer not found: ${consumerId}`);
@@ -1524,6 +1529,7 @@ io.on("connection", (socket) => {
 
 			if (consumer.paused) {
 				await consumer.resume();
+				console.log(`Consumer resumed: ${consumerId}`);
 			}
 
 			callback();
