@@ -26,24 +26,81 @@ export function HLSControls({ socket, isConnected }: HLSControlsProps) {
 	const [hlsUrl, setHlsUrl] = useState("");
 	const [streamId, setStreamId] = useState("");
 	const [isStreaming, setIsStreaming] = useState(false);
+	const [isStartingStream, setIsStartingStream] = useState(false);
+	const [streamStatus, setStreamStatus] = useState<string>("idle");
 
-	const startHLS = () => {
+	// Function to check if HLS stream is ready
+	const checkStreamReadiness = async (streamId: string): Promise<boolean> => {
+		try {
+			const serverUrl =
+				process.env.NEXT_PUBLIC_SERVER_URL || "http://localhost:3000";
+			const response = await fetch(`${serverUrl}/hls/${streamId}/status`);
+			const data = await response.json();
+			return data.ready;
+		} catch (error) {
+			console.error("Error checking stream readiness:", error);
+			return false;
+		}
+	};
+
+	// Function to poll stream readiness with timeout
+	const pollStreamReadiness = async (
+		streamId: string,
+		maxAttempts = 15,
+	): Promise<boolean> => {
+		for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+			setStreamStatus(
+				`Checking stream readiness... (${attempt}/${maxAttempts})`,
+			);
+
+			const isReady = await checkStreamReadiness(streamId);
+			if (isReady) {
+				setStreamStatus("Stream ready!");
+				return true;
+			}
+
+			// Wait 2 seconds between attempts
+			await new Promise((resolve) => setTimeout(resolve, 2000));
+		}
+
+		setStreamStatus("Stream failed to initialize");
+		return false;
+	};
+
+	const startHLS = async () => {
 		if (!socket || !isConnected) {
 			alert("Socket not connected");
 			return;
 		}
 
+		setIsStartingStream(true);
+		setStreamStatus("Starting HLS stream...");
+
 		socket.emit(
 			"startHLS",
 			{ socketId: socket.id },
-			(response: HLSStartResponse) => {
+			async (response: HLSStartResponse) => {
 				if (response.error) {
 					alert(`Error starting HLS: ${response.error}`);
+					setIsStartingStream(false);
+					setStreamStatus("idle");
 				} else {
-					setHlsUrl(response.hlsUrl);
-					setStreamId(response.streamId);
-					setIsStreaming(true);
 					console.log("HLS streaming started:", response);
+					setStreamStatus("Stream created, waiting for segments...");
+
+					// Wait for stream to be ready
+					const isReady = await pollStreamReadiness(response.streamId || "");
+
+					if (isReady) {
+						setHlsUrl(response?.hlsUrl || "");
+						setStreamId(response?.streamId || "");
+						setIsStreaming(true);
+						setStreamStatus("idle");
+					} else {
+						alert("Stream failed to initialize properly. Please try again.");
+					}
+
+					setIsStartingStream(false);
 				}
 			},
 		);
@@ -59,6 +116,8 @@ export function HLSControls({ socket, isConnected }: HLSControlsProps) {
 				setHlsUrl("");
 				setStreamId("");
 				setIsStreaming(false);
+				setIsStartingStream(false);
+				setStreamStatus("idle");
 				console.log("HLS streaming stopped");
 			}
 		});
@@ -92,15 +151,33 @@ export function HLSControls({ socket, isConnected }: HLSControlsProps) {
 				<div className="flex gap-2">
 					<Button
 						onClick={startHLS}
-						disabled={!isConnected || isStreaming}
+						disabled={!isConnected || isStreaming || isStartingStream}
 						variant="outline"
 					>
-						Start HLS Stream
+						{isStartingStream ? "Starting Stream..." : "Start HLS Stream"}
 					</Button>
-					<Button onClick={stopHLS} disabled={!isStreaming} variant="outline">
+					<Button
+						onClick={stopHLS}
+						disabled={!isStreaming || isStartingStream}
+						variant="outline"
+					>
 						Stop HLS Stream
 					</Button>
 				</div>
+
+				{/* Show loading state and status */}
+				{isStartingStream && (
+					<div className="space-y-2">
+						<div className="flex items-center gap-2 text-blue-600">
+							<div className="h-4 w-4 animate-spin rounded-full border-blue-600 border-b-2" />
+							<span>{streamStatus}</span>
+						</div>
+						<p className="text-gray-500 text-sm">
+							Please wait while the HLS stream initializes. This may take up to
+							30 seconds.
+						</p>
+					</div>
+				)}
 
 				{isStreaming && hlsUrl && (
 					<div className="space-y-2">
