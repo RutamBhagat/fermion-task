@@ -145,7 +145,7 @@ export default function WatchPage() {
 				<div className="flex gap-2">
 					<Input
 						type="text"
-						placeholder={`Enter HLS stream URL (e.g., ${process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3000'}/hls/stream_123/stream.m3u8)`}
+						placeholder={`Enter HLS stream URL (e.g., ${process.env.NEXT_PUBLIC_SERVER_URL || "http://localhost:3000"}/hls/stream_123/stream.m3u8)`}
 						value={streamUrl}
 						onChange={(e) => setStreamUrl(e.target.value)}
 						className="flex-1"
@@ -190,7 +190,8 @@ export default function WatchPage() {
 				<div className="mt-4 rounded bg-gray-100 p-3">
 					<p className="font-semibold">Example HLS URL format:</p>
 					<code className="text-xs">
-						{process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3000'}/hls/stream_&lt;socketId&gt;_&lt;timestamp&gt;/stream.m3u8
+						{process.env.NEXT_PUBLIC_SERVER_URL || "http://localhost:3000"}
+						/hls/stream_&lt;socketId&gt;_&lt;timestamp&gt;/stream.m3u8
 					</code>
 				</div>
 			</div>

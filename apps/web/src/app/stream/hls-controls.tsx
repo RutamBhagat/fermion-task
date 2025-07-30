@@ -66,7 +66,8 @@ export function HLSControls({ socket, isConnected }: HLSControlsProps) {
 
 	const copyHlsUrl = () => {
 		if (hlsUrl) {
-			const serverUrl = process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3000';
+			const serverUrl =
+				process.env.NEXT_PUBLIC_SERVER_URL || "http://localhost:3000";
 			const fullUrl = `${serverUrl}${hlsUrl}`;
 			navigator.clipboard.writeText(fullUrl);
 			alert("HLS URL copied to clipboard!");
@@ -75,7 +76,8 @@ export function HLSControls({ socket, isConnected }: HLSControlsProps) {
 
 	const openWatchPage = () => {
 		if (streamId) {
-			const serverUrl = process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3000';
+			const serverUrl =
+				process.env.NEXT_PUBLIC_SERVER_URL || "http://localhost:3000";
 			const fullUrl = `${serverUrl}${hlsUrl}`;
 			window.open(`/watch?stream=${encodeURIComponent(fullUrl)}`, "_blank");
 		}
@@ -104,7 +106,7 @@ export function HLSControls({ socket, isConnected }: HLSControlsProps) {
 					<div className="space-y-2">
 						<div className="flex gap-2">
 							<Input
-								value={`${process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3000'}${hlsUrl}`}
+								value={`${process.env.NEXT_PUBLIC_SERVER_URL || "http://localhost:3000"}${hlsUrl}`}
 								readOnly
 								className="flex-1"
 							/>
