@@ -8,6 +8,7 @@ import type {
 	IceParameters,
 	Producer,
 	RtpCapabilities,
+	RtpParameters,
 	Transport,
 } from "mediasoup-client/types";
 
@@ -20,10 +21,11 @@ interface TransportParams {
 	};
 }
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { io, type Socket } from "socket.io-client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { HLSControls } from "./hls-controls";
 
 export default function StreamPage() {
 	const [isConnected, setIsConnected] = useState(false);
@@ -40,6 +42,116 @@ export default function StreamPage() {
 	const consumerTransportRef = useRef<Transport | null>(null);
 	const producersRef = useRef<Producer[]>([]);
 	const consumersRef = useRef<Consumer[]>([]);
+
+	// Helper functions defined first
+	const updateRemoteStream = useCallback(() => {
+		if (consumersRef.current.length === 0) return;
+
+		// Combine all consumer tracks into one stream
+		const tracks = consumersRef.current.map((consumer) => consumer.track);
+		const combinedStream = new MediaStream(tracks);
+
+		setRemoteStreams([combinedStream]);
+
+		// Display in remote video element
+		if (remoteVideoRef.current) {
+			remoteVideoRef.current.srcObject = combinedStream;
+		}
+	}, []);
+
+	const createConsumerTransport = useCallback(async () => {
+		const socket = socketRef.current;
+		const device = deviceRef.current;
+
+		if (!socket || !device || consumerTransportRef.current) return;
+
+		try {
+			const { params } = await new Promise<TransportParams>((resolve) => {
+				socket.emit("createWebRtcTransport", { type: "consumer" }, resolve);
+			});
+
+			const consumerTransport = device.createRecvTransport(params);
+			consumerTransportRef.current = consumerTransport;
+
+			consumerTransport.on("connect", async ({ dtlsParameters }, callback) => {
+				socket.emit(
+					"connectTransport",
+					{
+						transportId: consumerTransport.id,
+						dtlsParameters,
+					},
+					callback,
+				);
+			});
+
+			console.log("Consumer transport created");
+		} catch (error) {
+			console.error("Failed to create consumer transport:", error);
+		}
+	}, []);
+
+	const createConsumer = useCallback(
+		async (_producerId: string, socketId: string) => {
+			const socket = socketRef.current;
+			const device = deviceRef.current;
+
+			if (!socket || !device || !consumerTransportRef.current) return;
+
+			try {
+				// Create consumers for all tracks (audio + video)
+				const { params: consumerParamsArray } = await new Promise<{
+					params: Array<{
+						id: string;
+						producerId: string;
+						kind: "audio" | "video";
+						rtpParameters: RtpParameters;
+					}>;
+				}>((resolve) => {
+					socket.emit(
+						"consume",
+						{
+							producerSocketId: socketId,
+							rtpCapabilities: device.rtpCapabilities,
+						},
+						resolve,
+					);
+				});
+
+				// Create consumers for each track
+				for (const consumerParams of consumerParamsArray) {
+					const consumer = await consumerTransportRef.current.consume({
+						id: consumerParams.id,
+						producerId: consumerParams.producerId,
+						kind: consumerParams.kind,
+						rtpParameters: consumerParams.rtpParameters,
+					});
+
+					// Resume consumer
+					await new Promise<void>((resolve) => {
+						socket.emit("resume", { consumerId: consumer.id }, resolve);
+					});
+
+					// Add consumer to list
+					consumersRef.current.push(consumer);
+
+					console.log(
+						"Consumer created:",
+						consumer.id,
+						"for producer:",
+						consumerParams.producerId,
+						"kind:",
+						consumerParams.kind,
+					);
+				}
+
+				// Update remote stream with all tracks
+				updateRemoteStream();
+			} catch (error) {
+				console.error("Failed to create consumer:", error);
+			}
+		},
+		[updateRemoteStream],
+	);
 
 	useEffect(() => {
 		let mounted = true;
@@ -82,7 +194,7 @@ export default function StreamPage() {
 						}
 
 						setStatus("Ready to stream");
-						
+
 						// Create consumer transport immediately after device setup
 						await createConsumerTransport();
 
@@ -117,7 +229,7 @@ export default function StreamPage() {
 				socket.on("producerClosed", ({ socketId }) => {
 					console.log("Producer closed:", socketId);
 					// Remove consumers associated with this producer
-					const remainingConsumers = consumersRef.current.filter(consumer => {
+					const remainingConsumers = consumersRef.current.filter((consumer) => {
 						// Remove consumer if it belongs to the closed producer
 						if (consumer.producerId.includes(socketId)) {
 							consumer.close();
@@ -126,10 +238,10 @@ export default function StreamPage() {
 						return true;
 					});
 					consumersRef.current = remainingConsumers;
-					
+
 					// Update remote streams
-					setRemoteStreams(prev => 
-						prev.filter((_, index) => index < remainingConsumers.length)
+					setRemoteStreams((prev) =>
+						prev.filter((_, index) => index < remainingConsumers.length),
 					);
 				});
 			} catch (error) {
@@ -155,7 +267,7 @@ export default function StreamPage() {
 				consumerTransportRef.current.close();
 			}
 		};
-	}, []);
+	}, [createConsumer, createConsumerTransport]);
 
 	const startProducing = async () => {
 		const socket = socketRef.current;
@@ -169,17 +281,21 @@ export default function StreamPage() {
 
 			// Create producer transport
 			const { params } = await new Promise<TransportParams>((resolve) => {
-				socket.emit("createWebRtcTransport", { type: 'producer' }, resolve);
+				socket.emit("createWebRtcTransport", { type: "producer" }, resolve);
 			});
 
 			const transport = device.createSendTransport(params);
 			producerTransportRef.current = transport;
 
 			transport.on("connect", async ({ dtlsParameters }, callback) => {
-				socket.emit("connectTransport", { 
-					transportId: transport.id,
-					dtlsParameters 
-				}, callback);
+				socket.emit(
+					"connectTransport",
+					{
+						transportId: transport.id,
+						dtlsParameters,
+					},
+					callback,
+				);
 			});
 
 			transport.on("produce", async (parameters, callback) => {
@@ -220,101 +336,6 @@ export default function StreamPage() {
 		}
 	};
 
-	const createConsumerTransport = async () => {
-		const socket = socketRef.current;
-		const device = deviceRef.current;
-
-		if (!socket || !device || consumerTransportRef.current) return;
-
-		try {
-			const { params } = await new Promise<TransportParams>((resolve) => {
-				socket.emit("createWebRtcTransport", { type: 'consumer' }, resolve);
-			});
-
-			const consumerTransport = device.createRecvTransport(params);
-			consumerTransportRef.current = consumerTransport;
-
-			consumerTransport.on("connect", async ({ dtlsParameters }, callback) => {
-				socket.emit("connectTransport", { 
-					transportId: consumerTransport.id,
-					dtlsParameters 
-				}, callback);
-			});
-
-			console.log("Consumer transport created");
-		} catch (error) {
-			console.error("Failed to create consumer transport:", error);
-		}
-	};
-
-	const createConsumer = async (_producerId: string, socketId: string) => {
-		const socket = socketRef.current;
-		const device = deviceRef.current;
-
-		if (!socket || !device || !consumerTransportRef.current) return;
-
-		try {
-			// Create consumers for all tracks (audio + video)
-			const { params: consumerParamsArray } = await new Promise<{
-				params: Array<{
-					id: string;
-					producerId: string;
-					kind: "audio" | "video";
-					rtpParameters: any;
-				}>;
-			}>((resolve) => {
-				socket.emit(
-					"consume",
-					{
-						producerSocketId: socketId,
-						rtpCapabilities: device.rtpCapabilities,
-					},
-					resolve,
-				);
-			});
-
-			// Create consumers for each track
-			for (const consumerParams of consumerParamsArray) {
-				const consumer = await consumerTransportRef.current.consume({
-					id: consumerParams.id,
-					producerId: consumerParams.producerId,
-					kind: consumerParams.kind,
-					rtpParameters: consumerParams.rtpParameters,
-				});
-
-				// Resume consumer
-				await new Promise<void>((resolve) => {
-					socket.emit("resume", { consumerId: consumer.id }, resolve);
-				});
-
-				// Add consumer to list
-				consumersRef.current.push(consumer);
-
-				console.log("Consumer created:", consumer.id, "for producer:", consumerParams.producerId, "kind:", consumerParams.kind);
-			}
-
-			// Update remote stream with all tracks
-			updateRemoteStream();
-		} catch (error) {
-			console.error("Failed to create consumer:", error);
-		}
-	};
-
-	const updateRemoteStream = () => {
-		if (consumersRef.current.length === 0) return;
-
-		// Combine all consumer tracks into one stream
-		const tracks = consumersRef.current.map(consumer => consumer.track);
-		const combinedStream = new MediaStream(tracks);
-
-		setRemoteStreams([combinedStream]);
-
-		// Display in remote video element
-		if (remoteVideoRef.current) {
-			remoteVideoRef.current.srcObject = combinedStream;
-		}
-	};
-
 	return (
 		<div className="container mx-auto space-y-6 p-4">
 			<div className="text-center">
@@ -352,7 +373,7 @@ export default function StreamPage() {
 								aria-label="Remote video stream"
 							/>
 						) : (
-							<div className="aspect-video w-full rounded-lg bg-gray-900 flex items-center justify-center text-gray-400">
+							<div className="flex aspect-video w-full items-center justify-center rounded-lg bg-gray-900 text-gray-400">
 								<p>Waiting for remote stream...</p>
 							</div>
 						)}
@@ -381,13 +402,21 @@ export default function StreamPage() {
 							{isConnected ? "🟢 Connected" : "🔴 Disconnected"}
 						</p>
 						<p>Device Ready: {deviceRef.current ? "🟢 Yes" : "🔴 No"}</p>
-						<p>Producing: {isProducing ? "🟢 Yes" : "🔴 No"} ({producersRef.current.length} tracks)</p>
-						<p>Consumer Transport: {consumerTransportRef.current ? "🟢 Ready" : "🔴 Not Ready"}</p>
+						<p>
+							Producing: {isProducing ? "🟢 Yes" : "🔴 No"} (
+							{producersRef.current.length} tracks)
+						</p>
+						<p>
+							Consumer Transport:{" "}
+							{consumerTransportRef.current ? "🟢 Ready" : "🔴 Not Ready"}
+						</p>
 						<p>Remote Streams: {remoteStreams.length}</p>
 						<p>Active Consumers: {consumersRef.current.length}</p>
 					</div>
 				</CardContent>
 			</Card>
+
+			<HLSControls socket={socketRef.current} isConnected={isConnected} />
 		</div>
 	);
 }
