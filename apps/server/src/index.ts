@@ -171,9 +171,12 @@ async function initMediasoup() {
 			},
 			{
 				kind: "video",
-				mimeType: "video/VP8",
+				mimeType: "video/H264",
 				clockRate: 90000,
 				parameters: {
+					"packetization-mode": 1,
+					"profile-level-id": "42001f", // Baseline profile
+					"level-asymmetry-allowed": 1,
 					"x-google-start-bitrate": 1000,
 				},
 			},
@@ -249,7 +252,291 @@ function generateSDP(
 	return sdp;
 }
 
+// Function to generate composite SDP file with multiple streams
+function generateCompositeSDP(
+	audioConsumers: mediasoup.types.Consumer[],
+	videoConsumers: mediasoup.types.Consumer[],
+	basePort: number,
+): string {
+	let sdp = "v=0\r\n";
+	sdp += "o=- 0 0 IN IP4 127.0.0.1\r\n";
+	sdp += "s=FFmpeg\r\n";
+	sdp += "c=IN IP4 127.0.0.1\r\n";
+	sdp += "t=0 0\r\n";
+
+	let currentPort = basePort;
+
+	// Add all audio streams
+	audioConsumers.forEach((consumer, i) => {
+		const audioCodec = consumer.rtpParameters.codecs[0];
+		const audioPayloadType = audioCodec.payloadType;
+		const audioPort = currentPort;
+		currentPort += 2; // Skip RTCP port
+
+		sdp += `m=audio ${audioPort} RTP/AVP ${audioPayloadType}\r\n`;
+		sdp += `a=rtpmap:${audioPayloadType} ${audioCodec.mimeType.split("/")[1]}/${audioCodec.clockRate}`;
+
+		if (audioCodec.channels && audioCodec.channels > 1) {
+			sdp += `/${audioCodec.channels}`;
+		}
+		sdp += "\r\n";
+		sdp += "a=sendonly\r\n";
+
+		if (consumer.rtpParameters.encodings?.[0]?.ssrc) {
+			sdp += `a=ssrc:${consumer.rtpParameters.encodings[0].ssrc} cname:mediasoup\r\n`;
+		}
+	});
+
+	// Add all video streams
+	videoConsumers.forEach((consumer, i) => {
+		const videoCodec = consumer.rtpParameters.codecs[0];
+		const videoPayloadType = videoCodec.payloadType;
+		const videoPort = currentPort;
+		currentPort += 2; // Skip RTCP port
+
+		sdp += `m=video ${videoPort} RTP/AVP ${videoPayloadType}\r\n`;
+		sdp += `a=rtpmap:${videoPayloadType} ${videoCodec.mimeType.split("/")[1]}/${videoCodec.clockRate}\r\n`;
+		sdp += "a=sendonly\r\n";
+
+		if (consumer.rtpParameters.encodings?.[0]?.ssrc) {
+			sdp += `a=ssrc:${consumer.rtpParameters.encodings[0].ssrc} cname:mediasoup\r\n`;
+		}
+	});
+
+	return sdp;
+}
+
 // HLS Streaming Functions
+async function createCompositeHLSStream(
+	streamId: string,
+	audioProducers: mediasoup.types.Producer[],
+	videoProducers: mediasoup.types.Producer[],
+) {
+	if (audioProducers.length === 0 && videoProducers.length === 0) {
+		throw new Error("At least one producer (audio or video) is required");
+	}
+
+	// Create stream directory
+	const streamDir = `${HLS_DIR}/${streamId}`;
+	if (!existsSync(streamDir)) {
+		mkdirSync(streamDir, { recursive: true });
+	}
+
+	// Create multiple PlainTransports and consumers for composition
+	const audioTransports: mediasoup.types.PlainTransport[] = [];
+	const videoTransports: mediasoup.types.PlainTransport[] = [];
+	const audioConsumers: mediasoup.types.Consumer[] = [];
+	const videoConsumers: mediasoup.types.Consumer[] = [];
+	
+	// Allocate ports for each stream
+	const basePort = 20000;
+	let currentPort = basePort;
+	
+	// Create consumers for all audio producers
+	for (let i = 0; i < audioProducers.length; i++) {
+		const audioProducer = audioProducers[i];
+		const audioRtpPort = currentPort++;
+		const audioRtcpPort = currentPort++;
+		
+		const audioTransport = await router.createPlainTransport({
+			listenIp: { ip: "127.0.0.1" },
+			rtcpMux: false,
+			comedia: false,
+		});
+		
+		const audioConsumer = await audioTransport.consume({
+			producerId: audioProducer.id,
+			rtpCapabilities: router.rtpCapabilities,
+			paused: true,
+		});
+		
+		await audioTransport.connect({
+			ip: "127.0.0.1",
+			port: audioRtpPort,
+			rtcpPort: audioRtcpPort,
+		});
+		
+		audioTransports.push(audioTransport);
+		audioConsumers.push(audioConsumer);
+		
+		console.log(`Audio ${i} PlainTransport connected on ports ${audioRtpPort}/${audioRtcpPort}`);
+	}
+	
+	// Create consumers for all video producers  
+	for (let i = 0; i < videoProducers.length; i++) {
+		const videoProducer = videoProducers[i];
+		const videoRtpPort = currentPort++;
+		const videoRtcpPort = currentPort++;
+		
+		const videoTransport = await router.createPlainTransport({
+			listenIp: { ip: "127.0.0.1" },
+			rtcpMux: false,
+			comedia: false,
+		});
+		
+		const videoConsumer = await videoTransport.consume({
+			producerId: videoProducer.id,
+			rtpCapabilities: router.rtpCapabilities,
+			paused: true,
+		});
+		
+		await videoTransport.connect({
+			ip: "127.0.0.1",
+			port: videoRtpPort,
+			rtcpPort: videoRtcpPort,
+		});
+		
+		videoTransports.push(videoTransport);
+		videoConsumers.push(videoConsumer);
+		
+		console.log(`Video ${i} PlainTransport connected on ports ${videoRtpPort}/${videoRtcpPort}`);
+	}
+
+	// Create single composite SDP file with all streams
+	const fs = await import("node:fs/promises");
+	const compositeSdp = generateCompositeSDP(audioConsumers, videoConsumers, basePort);
+	const sdpPath = `${streamDir}/composite.sdp`;
+	await fs.writeFile(sdpPath, compositeSdp);
+	console.log(`Composite SDP created: ${sdpPath}`);
+	console.log(`SDP Content:\n${compositeSdp}`);
+
+	// Build FFmpeg command for single SDP input with multiple streams
+	const ffmpegArgs = [
+		"-y", 
+		"-loglevel", "debug",
+		"-protocol_whitelist", "file,rtp,udp",
+		"-f", "sdp",
+		"-i", sdpPath
+	];
+	
+	// Add filter complex for composition
+	// Single input file with multiple streams: stream 0=audio0, stream 1=audio1, stream 2=video0, stream 3=video1
+	const videoStartIndex = audioConsumers.length;
+	
+	let filterComplex = "";
+	
+	// Handle video composition
+	if (videoConsumers.length > 1) {
+		// Create side-by-side video layout
+		const videoInputs = videoConsumers.map((_, i) => `[0:${videoStartIndex + i}]`).join("");
+		filterComplex = `${videoInputs}hstack=inputs=${videoConsumers.length}[v]`;
+	}
+	
+	// Handle audio mixing
+	if (audioConsumers.length > 1) {
+		const audioInputs = audioConsumers.map((_, i) => `[0:${i}]`).join("");
+		const audioFilter = `${audioInputs}amix=inputs=${audioConsumers.length}[a]`;
+		
+		if (filterComplex) {
+			filterComplex += `;${audioFilter}`;
+		} else {
+			filterComplex = audioFilter;
+		}
+	}
+	
+	// Apply filter complex if needed
+	if (filterComplex) {
+		ffmpegArgs.push("-filter_complex", filterComplex);
+	}
+	
+	// Map outputs
+	if (videoConsumers.length > 1) {
+		ffmpegArgs.push("-map", "[v]");
+	} else if (videoConsumers.length === 1) {
+		ffmpegArgs.push("-map", `0:${videoStartIndex}`);
+	}
+	
+	if (audioConsumers.length > 1) {
+		ffmpegArgs.push("-map", "[a]");
+	} else if (audioConsumers.length === 1) {
+		ffmpegArgs.push("-map", "0:0");
+	}
+	
+	// Add encoding options
+	if (videoConsumers.length > 0) {
+		ffmpegArgs.push(
+			"-c:v", "libx264",
+			"-preset", "ultrafast", 
+			"-tune", "zerolatency",
+			"-profile:v", "baseline",
+			"-level", "3.1",
+			"-pix_fmt", "yuv420p",
+			"-r", "30",
+			"-bf", "0"
+		);
+	}
+	
+	if (audioConsumers.length > 0) {
+		ffmpegArgs.push(
+			"-c:a", "aac", 
+			"-b:a", "128k",
+			"-ar", "48000",
+			"-ac", "2"
+		);
+	}
+	
+	// Add HLS options for LIVE streaming
+	ffmpegArgs.push(
+		"-f", "hls",
+		"-hls_time", "2",
+		"-hls_list_size", "6",
+		"-hls_flags", "delete_segments+omit_endlist",
+		"-hls_segment_type", "mpegts",
+		"-hls_allow_cache", "0",
+		"-start_number", "0",
+		`${streamDir}/stream.m3u8`
+	);
+
+	console.log(`Starting composite FFmpeg: ${ffmpegArgs.join(" ")}`);
+
+	// Start FFmpeg process
+	const ffmpegProcess = spawn("ffmpeg", ffmpegArgs, {
+		stdio: ["ignore", "pipe", "pipe"],
+	});
+
+	ffmpegProcess.stdout?.on("data", (data: Buffer) => {
+		console.log(`FFmpeg stdout [${streamId}]: ${data}`);
+	});
+
+	ffmpegProcess.stderr?.on("data", (data: Buffer) => {
+		console.log(`FFmpeg stderr [${streamId}]: ${data}`);
+	});
+
+	ffmpegProcess.on("error", (error: Error) => {
+		console.error(`FFmpeg process error [${streamId}]:`, error);
+		hlsProcesses.delete(streamId);
+	});
+
+	ffmpegProcess.on("close", (code: number | null) => {
+		console.log(`FFmpeg process for stream ${streamId} exited with code ${code}`);
+		hlsProcesses.delete(streamId);
+	});
+
+	// Resume all consumers after FFmpeg starts
+	setTimeout(async () => {
+		try {
+			for (const consumer of [...audioConsumers, ...videoConsumers]) {
+				if (consumer.paused) {
+					await consumer.resume();
+					console.log(`Consumer resumed for stream ${streamId}: ${consumer.kind}`);
+				}
+			}
+		} catch (error) {
+			console.error(`Error resuming consumers for stream ${streamId}:`, error);
+		}
+	}, 2000);
+
+	// Store references
+	plainTransports.set(streamId, { 
+		audioTransport: audioTransports[0], 
+		videoTransport: videoTransports[0] 
+	});
+	hlsProcesses.set(streamId, ffmpegProcess);
+
+	console.log(`Composite HLS stream created for ${streamId}`);
+	return { streamId, hlsUrl: `/hls/${streamId}/stream.m3u8` };
+}
+
 async function createHLSStream(
 	streamId: string,
 	audioProducer?: mediasoup.types.Producer,
@@ -376,34 +663,27 @@ async function createHLSStream(
 		sdpPath,
 	];
 
-	// Add encoding options with better sync handling
+	// Add encoding options optimized for H.264 stream copying
 	if (videoProducer && audioProducer) {
-		// Both audio and video - ensure sync
+		// Both audio and video - use stream copying for H.264
 		ffmpegArgs.push(
-			"-c:v", "libx264",
-			"-preset", "ultrafast", 
-			"-tune", "zerolatency",
-			"-profile:v", "baseline",
-			"-level", "3.1",
-			"-pix_fmt", "yuv420p",
-			"-r", "30", // Force 30fps
+			"-c:v", "copy",      // Copy H.264 stream instead of transcoding
+			"-bf", "0",          // No B-frames
 			"-c:a", "aac", 
 			"-b:a", "128k",
-			"-ar", "48000",
-			"-ac", "2",
-			"-async", "1", // Audio sync
-			"-vsync", "cfr" // Constant frame rate
+			"-avoid_negative_ts", "make_zero",
+			"-fflags", "+genpts", // Generate timestamps
+			"-vsync", "0",        // Don't force frame rate
+			"-async", "1"         // Audio sync
 		);
 	} else if (videoProducer) {
-		// Video only
+		// Video only - copy H.264 stream
 		ffmpegArgs.push(
-			"-c:v", "libx264",
-			"-preset", "ultrafast", 
-			"-tune", "zerolatency",
-			"-profile:v", "baseline",
-			"-level", "3.1",
-			"-pix_fmt", "yuv420p",
-			"-r", "30"
+			"-c:v", "copy",
+			"-bf", "0",
+			"-avoid_negative_ts", "make_zero",
+			"-fflags", "+genpts",
+			"-vsync", "0"
 		);
 	} else if (audioProducer) {
 		// Audio only
@@ -415,16 +695,18 @@ async function createHLSStream(
 		);
 	}
 
-	// Add HLS options
+	// Add HLS options optimized for stability
 	ffmpegArgs.push(
 		"-f",
 		"hls",
 		"-hls_time",
-		"2",
+		"2",                    // Shorter segments for lower latency
 		"-hls_list_size",
-		"5",
+		"6",                    // Keep more segments for buffering
 		"-hls_flags",
-		"delete_segments+append_list",
+		"delete_segments+omit_endlist", // Live streaming flags
+		"-hls_segment_type",
+		"mpegts",
 		"-hls_allow_cache",
 		"0",
 		"-start_number",
@@ -443,8 +725,43 @@ async function createHLSStream(
 		console.log(`FFmpeg stdout [${streamId}]: ${data}`);
 	});
 
+	// Stream health monitoring
+	let droppedFrames = 0;
+	let duplicatedFrames = 0;
+	let lastHealthCheck = Date.now();
+
 	ffmpegProcess.stderr?.on("data", (data: Buffer) => {
-		console.log(`FFmpeg stderr [${streamId}]: ${data}`);
+		const output = data.toString();
+		console.log(`FFmpeg stderr [${streamId}]: ${output}`);
+
+		// Monitor frame drops
+		const dropMatch = output.match(/dropping frame (\d+)/);
+		if (dropMatch) {
+			droppedFrames++;
+		}
+
+		// Monitor duplicated frames
+		const dupMatch = output.match(/dup=(\d+)/);
+		if (dupMatch) {
+			duplicatedFrames = parseInt(dupMatch[1]);
+		}
+
+		// Health check every 30 seconds
+		const now = Date.now();
+		if (now - lastHealthCheck > 30000) {
+			console.log(`Stream ${streamId} health: dropped=${droppedFrames}, duplicated=${duplicatedFrames}`);
+			
+			// Auto-restart on excessive drops (more than 100 in 30 seconds)
+			if (droppedFrames > 100) {
+				console.warn(`Restarting stream ${streamId} due to excessive frame drops (${droppedFrames})`);
+				// Note: Auto-restart would require additional logic to recreate the stream
+				// For now, just log the warning
+			}
+			
+			// Reset counters
+			lastHealthCheck = now;
+			droppedFrames = 0;
+		}
 	});
 
 	ffmpegProcess.on("error", (error: Error) => {
@@ -771,29 +1088,35 @@ io.on("connection", (socket) => {
 		callback(existingProducers);
 	});
 
-	// Start HLS streaming
+	// Start HLS streaming - supports multiple users
 	socket.on("startHLS", async (data, callback) => {
 		try {
-			const { socketId } = data;
-			const streamId = `stream_${socketId}_${Date.now()}`;
+			const streamId = `stream_composite_${Date.now()}`;
+			
+			// Collect all producers from all connected users
+			const allAudioProducers: mediasoup.types.Producer[] = [];
+			const allVideoProducers: mediasoup.types.Producer[] = [];
+			
+			producers.forEach((producerList, socketId) => {
+				const audioProducer = producerList.find(
+					(p: mediasoup.types.Producer) => p.kind === "audio",
+				);
+				const videoProducer = producerList.find(
+					(p: mediasoup.types.Producer) => p.kind === "video",
+				);
+				
+				if (audioProducer) allAudioProducers.push(audioProducer);
+				if (videoProducer) allVideoProducers.push(videoProducer);
+			});
 
-			const producerList = producers.get(socketId);
-			if (!producerList || producerList.length === 0) {
+			if (allAudioProducers.length === 0 && allVideoProducers.length === 0) {
 				throw new Error("No producers found for HLS streaming");
 			}
 
-			// Find audio and video producers
-			const audioProducer = producerList.find(
-				(p: mediasoup.types.Producer) => p.kind === "audio",
-			);
-			const videoProducer = producerList.find(
-				(p: mediasoup.types.Producer) => p.kind === "video",
-			);
-
-			const result = await createHLSStream(
+			const result = await createCompositeHLSStream(
 				streamId,
-				audioProducer,
-				videoProducer,
+				allAudioProducers,
+				allVideoProducers,
 			);
 			callback(result);
 		} catch (error) {
