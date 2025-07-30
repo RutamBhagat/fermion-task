@@ -7,6 +7,7 @@ import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import * as mediasoup from "mediasoup";
 import { Server } from "socket.io";
+import fs from "fs";
 
 const app = new Hono();
 
@@ -44,41 +45,6 @@ app.get("/hls/*", async (c) => {
 	}
 });
 
-// Check HLS stream readiness endpoint
-app.get("/hls/:streamId/status", async (c) => {
-	const streamId = c.req.param("streamId");
-	const fs = await import("node:fs/promises");
-	const streamPath = `./hls/${streamId}/stream.m3u8`;
-
-	try {
-		const stats = await fs.stat(streamPath);
-		// Check if file exists and has content
-		if (stats.size > 0) {
-			const content = await fs.readFile(streamPath, "utf-8");
-			// Check if playlist has at least one segment
-			const hasSegments = content.includes(".ts");
-			return c.json({
-				ready: hasSegments,
-				fileExists: true,
-				fileSize: stats.size,
-				hasSegments,
-			});
-		}
-		return c.json({
-			ready: false,
-			fileExists: true,
-			fileSize: 0,
-			hasSegments: false,
-		});
-	} catch (_error) {
-		return c.json({
-			ready: false,
-			fileExists: false,
-			fileSize: 0,
-			hasSegments: false,
-		});
-	}
-});
 
 // Watch page endpoint
 app.get("/watch/:streamId", (c) => {
@@ -284,6 +250,7 @@ const consumers = new Map<string, mediasoup.types.Consumer>(); // consumerId -> 
 // HLS Streaming
 const plainTransports = new Map<string, PlainTransports>(); // streamId -> PlainTransport
 const hlsProcesses = new Map<string, ChildProcess>(); // streamId -> FFmpeg process
+const streamSocketMap = new Map<string, string>(); // streamId -> socketId
 const HLS_DIR = "./hls";
 
 // Initialize Mediasoup
@@ -444,11 +411,56 @@ function generateCompositeSDP(
 	return sdp;
 }
 
+// Function to monitor HLS stream readiness
+function monitorHLSStream(streamId: string, socketId: string) {
+	const streamDir = `${HLS_DIR}/${streamId}`;
+	const streamPath = `${streamDir}/stream.m3u8`;
+	
+	const checkStream = () => {
+		// Check if the playlist file exists and has content
+		if (fs.existsSync(streamPath)) {
+			try {
+				const content = fs.readFileSync(streamPath, 'utf-8');
+				// Check if playlist has at least one segment
+				if (content.includes('.ts')) {
+					console.log(`HLS stream ${streamId} is ready - emitting event to ${socketId}`);
+					// Emit to the specific socket that requested the stream
+					io.to(socketId).emit('hlsStreamReady', { streamId });
+					return true;
+				}
+			} catch (error) {
+				console.error(`Error reading HLS playlist for ${streamId}:`, error);
+			}
+		}
+		return false;
+	};
+	
+	// Check immediately and then every 1 second for up to 30 seconds
+	let attempts = 0;
+	const maxAttempts = 30;
+	
+	const interval = setInterval(() => {
+		attempts++;
+		
+		if (checkStream()) {
+			clearInterval(interval);
+			return;
+		}
+		
+		if (attempts >= maxAttempts) {
+			console.warn(`HLS stream ${streamId} failed to initialize after ${maxAttempts} seconds`);
+			io.to(socketId).emit('hlsStreamFailed', { streamId, error: 'Stream failed to initialize' });
+			clearInterval(interval);
+		}
+	}, 1000);
+}
+
 // HLS Streaming Functions
 async function createCompositeHLSStream(
 	streamId: string,
 	audioProducers: mediasoup.types.Producer[],
 	videoProducers: mediasoup.types.Producer[],
+	socketId: string,
 ) {
 	if (audioProducers.length === 0 && videoProducers.length === 0) {
 		throw new Error("At least one producer (audio or video) is required");
@@ -700,6 +712,12 @@ async function createCompositeHLSStream(
 		videoTransport: videoTransports[0],
 	});
 	hlsProcesses.set(streamId, ffmpegProcess);
+	streamSocketMap.set(streamId, socketId);
+
+	// Start monitoring the stream for readiness
+	setTimeout(() => {
+		monitorHLSStream(streamId, socketId);
+	}, 3000); // Wait 3 seconds for FFmpeg to start generating files
 
 	console.log(`Composite HLS stream created for ${streamId}`);
 	return { streamId, hlsUrl: `/hls/${streamId}/stream.m3u8` };
@@ -995,6 +1013,9 @@ function stopHLSStream(streamId: string) {
 		if (transports.videoTransport) transports.videoTransport.close();
 		plainTransports.delete(streamId);
 	}
+
+	// Clean up socket mapping
+	streamSocketMap.delete(streamId);
 
 	console.log(`HLS stream stopped for ${streamId}`);
 }
@@ -1297,6 +1318,7 @@ io.on("connection", (socket) => {
 				streamId,
 				allAudioProducers,
 				allVideoProducers,
+				socket.id,
 			);
 			callback(result);
 		} catch (error) {

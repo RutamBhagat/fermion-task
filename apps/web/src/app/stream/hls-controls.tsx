@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import type { Socket } from "socket.io-client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -29,43 +29,33 @@ export function HLSControls({ socket, isConnected }: HLSControlsProps) {
 	const [isStartingStream, setIsStartingStream] = useState(false);
 	const [streamStatus, setStreamStatus] = useState<string>("idle");
 
-	// Function to check if HLS stream is ready
-	const checkStreamReadiness = async (streamId: string): Promise<boolean> => {
-		try {
-			const serverUrl =
-				process.env.NEXT_PUBLIC_SERVER_URL || "http://localhost:3000";
-			const response = await fetch(`${serverUrl}/hls/${streamId}/status`);
-			const data = await response.json();
-			return data.ready;
-		} catch (error) {
-			console.error("Error checking stream readiness:", error);
-			return false;
-		}
-	};
+	// Set up Socket.IO event listeners for HLS stream events
+	useEffect(() => {
+		if (!socket) return;
 
-	// Function to poll stream readiness with timeout
-	const pollStreamReadiness = async (
-		streamId: string,
-		maxAttempts = 15,
-	): Promise<boolean> => {
-		for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-			setStreamStatus(
-				`Checking stream readiness... (${attempt}/${maxAttempts})`,
-			);
+		const handleStreamReady = (data: { streamId: string }) => {
+			console.log("HLS stream ready:", data);
+			setStreamStatus("Stream ready!");
+			setIsStreaming(true);
+			setIsStartingStream(false);
+		};
 
-			const isReady = await checkStreamReadiness(streamId);
-			if (isReady) {
-				setStreamStatus("Stream ready!");
-				return true;
-			}
+		const handleStreamFailed = (data: { streamId: string; error: string }) => {
+			console.error("HLS stream failed:", data);
+			setStreamStatus("idle");
+			setIsStartingStream(false);
+			alert(`Stream failed to initialize: ${data.error}`);
+		};
 
-			// Wait 2 seconds between attempts
-			await new Promise((resolve) => setTimeout(resolve, 2000));
-		}
+		socket.on("hlsStreamReady", handleStreamReady);
+		socket.on("hlsStreamFailed", handleStreamFailed);
 
-		setStreamStatus("Stream failed to initialize");
-		return false;
-	};
+		// Cleanup listeners on unmount
+		return () => {
+			socket.off("hlsStreamReady", handleStreamReady);
+			socket.off("hlsStreamFailed", handleStreamFailed);
+		};
+	}, [socket]);
 
 	const startHLS = async () => {
 		if (!socket || !isConnected) {
@@ -79,7 +69,7 @@ export function HLSControls({ socket, isConnected }: HLSControlsProps) {
 		socket.emit(
 			"startHLS",
 			{ socketId: socket.id },
-			async (response: HLSStartResponse) => {
+			(response: HLSStartResponse) => {
 				if (response.error) {
 					alert(`Error starting HLS: ${response.error}`);
 					setIsStartingStream(false);
@@ -87,20 +77,11 @@ export function HLSControls({ socket, isConnected }: HLSControlsProps) {
 				} else {
 					console.log("HLS streaming started:", response);
 					setStreamStatus("Stream created, waiting for segments...");
-
-					// Wait for stream to be ready
-					const isReady = await pollStreamReadiness(response.streamId || "");
-
-					if (isReady) {
-						setHlsUrl(response?.hlsUrl || "");
-						setStreamId(response?.streamId || "");
-						setIsStreaming(true);
-						setStreamStatus("idle");
-					} else {
-						alert("Stream failed to initialize properly. Please try again.");
-					}
-
-					setIsStartingStream(false);
+					
+					// Store the stream details, but don't set streaming yet
+					// Wait for the hlsStreamReady event from the server
+					setHlsUrl(response?.hlsUrl || "");
+					setStreamId(response?.streamId || "");
 				}
 			},
 		);
