@@ -297,10 +297,11 @@ async function createHLSStream(
 			comedia: false, // We will connect TO FFmpeg
 		});
 
-		// Create consumer for audio
+		// Create consumer for audio (paused initially)
 		audioConsumer = await audioTransport.consume({
 			producerId: audioProducer.id,
 			rtpCapabilities: router.rtpCapabilities,
+			paused: true, // Start paused to avoid timing issues
 		});
 
 		// Connect transport to FFmpeg's listening ports
@@ -326,10 +327,11 @@ async function createHLSStream(
 			comedia: false, // We will connect TO FFmpeg
 		});
 
-		// Create consumer for video
+		// Create consumer for video (paused initially)
 		videoConsumer = await videoTransport.consume({
 			producerId: videoProducer.id,
 			rtpCapabilities: router.rtpCapabilities,
+			paused: true, // Start paused to avoid timing issues
 		});
 
 		// Connect transport to FFmpeg's listening ports
@@ -374,25 +376,43 @@ async function createHLSStream(
 		sdpPath,
 	];
 
-	// Add encoding options
-	if (videoProducer) {
+	// Add encoding options with better sync handling
+	if (videoProducer && audioProducer) {
+		// Both audio and video - ensure sync
 		ffmpegArgs.push(
-			"-c:v",
-			"libx264",
-			"-preset",
-			"ultrafast",
-			"-tune",
-			"zerolatency",
-			"-profile:v",
-			"baseline",
-			"-level",
-			"3.1",
-			"-pix_fmt",
-			"yuv420p",
+			"-c:v", "libx264",
+			"-preset", "ultrafast", 
+			"-tune", "zerolatency",
+			"-profile:v", "baseline",
+			"-level", "3.1",
+			"-pix_fmt", "yuv420p",
+			"-r", "30", // Force 30fps
+			"-c:a", "aac", 
+			"-b:a", "128k",
+			"-ar", "48000",
+			"-ac", "2",
+			"-async", "1", // Audio sync
+			"-vsync", "cfr" // Constant frame rate
 		);
-	}
-	if (audioProducer) {
-		ffmpegArgs.push("-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2");
+	} else if (videoProducer) {
+		// Video only
+		ffmpegArgs.push(
+			"-c:v", "libx264",
+			"-preset", "ultrafast", 
+			"-tune", "zerolatency",
+			"-profile:v", "baseline",
+			"-level", "3.1",
+			"-pix_fmt", "yuv420p",
+			"-r", "30"
+		);
+	} else if (audioProducer) {
+		// Audio only
+		ffmpegArgs.push(
+			"-c:a", "aac", 
+			"-b:a", "128k",
+			"-ar", "48000",
+			"-ac", "2"
+		);
 	}
 
 	// Add HLS options
@@ -438,6 +458,22 @@ async function createHLSStream(
 		);
 		hlsProcesses.delete(streamId);
 	});
+
+	// Give FFmpeg a moment to initialize, then resume consumers
+	setTimeout(async () => {
+		try {
+			if (audioConsumer && audioConsumer.paused) {
+				await audioConsumer.resume();
+				console.log(`Audio consumer resumed for stream ${streamId}`);
+			}
+			if (videoConsumer && videoConsumer.paused) {
+				await videoConsumer.resume();
+				console.log(`Video consumer resumed for stream ${streamId}`);
+			}
+		} catch (error) {
+			console.error(`Error resuming consumers for stream ${streamId}:`, error);
+		}
+	}, 2000); // Wait 2 seconds for FFmpeg to be ready
 
 	// Store references
 	plainTransports.set(streamId, { audioTransport, videoTransport });
