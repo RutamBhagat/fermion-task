@@ -1,13 +1,12 @@
 import "dotenv/config";
 import { type ChildProcess, spawn } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import fs, { existsSync, mkdirSync } from "node:fs";
 import { createServer } from "node:http";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import * as mediasoup from "mediasoup";
 import { Server } from "socket.io";
-import fs from "fs";
 
 const app = new Hono();
 
@@ -44,7 +43,6 @@ app.get("/hls/*", async (c) => {
 		return c.text("File not found", 404);
 	}
 });
-
 
 // Watch page endpoint
 app.get("/watch/:streamId", (c) => {
@@ -232,7 +230,7 @@ const io = new Server(server, {
 
 // Mediasoup Worker and Router
 let worker: mediasoup.types.Worker;
-let router: mediasoup.types.Router;
+
 interface SocketTransports {
 	producer?: mediasoup.types.WebRtcTransport;
 	consumer?: mediasoup.types.WebRtcTransport;
@@ -243,9 +241,22 @@ interface PlainTransports {
 	videoTransport?: mediasoup.types.PlainTransport;
 }
 
-const transports = new Map<string, SocketTransports>(); // socket.id -> {producer?: Transport, consumer?: Transport}
-const producers = new Map<string, mediasoup.types.Producer[]>(); // socket.id -> Producer[]
-const consumers = new Map<string, mediasoup.types.Consumer>(); // consumerId -> Consumer
+interface RoomState {
+	router: mediasoup.types.Router;
+	participants: Set<string>; // socket IDs
+	transports: Map<string, SocketTransports>;
+	producers: Map<string, mediasoup.types.Producer[]>;
+	consumers: Map<string, mediasoup.types.Consumer>;
+}
+
+// Room management
+const rooms = new Map<string, RoomState>(); // roomId -> RoomState
+
+// Legacy support (for backward compatibility with existing /stream page)
+let legacyRouter: mediasoup.types.Router;
+const legacyTransports = new Map<string, SocketTransports>(); // socket.id -> {producer?: Transport, consumer?: Transport}
+const legacyProducers = new Map<string, mediasoup.types.Producer[]>(); // socket.id -> Producer[]
+const legacyConsumers = new Map<string, mediasoup.types.Consumer>(); // consumerId -> Consumer
 
 // HLS Streaming
 const plainTransports = new Map<string, PlainTransports>(); // streamId -> PlainTransport
@@ -259,14 +270,14 @@ if (!existsSync(HLS_DIR)) {
 	mkdirSync(HLS_DIR, { recursive: true });
 }
 
-async function initMediasoup() {
-	worker = await mediasoup.createWorker({
-		logLevel: "debug",
-		rtcMinPort: 10000,
-		rtcMaxPort: 10100,
-	});
+// Room management helper functions
+async function createRoom(roomId: string): Promise<RoomState> {
+	const existingRoom = rooms.get(roomId);
+	if (existingRoom) {
+		return existingRoom;
+	}
 
-	router = await worker.createRouter({
+	const router = await worker.createRouter({
 		mediaCodecs: [
 			{
 				kind: "audio",
@@ -288,7 +299,104 @@ async function initMediasoup() {
 		],
 	});
 
-	console.log("Mediasoup worker and router initialized");
+	const roomState: RoomState = {
+		router,
+		participants: new Set(),
+		transports: new Map(),
+		producers: new Map(),
+		consumers: new Map(),
+	};
+
+	rooms.set(roomId, roomState);
+	console.log(`Room created: ${roomId}`);
+	return roomState;
+}
+
+function getRoomState(roomId: string): RoomState | null {
+	return rooms.get(roomId) || null;
+}
+
+function joinRoom(roomId: string, socketId: string): RoomState {
+	const roomState = rooms.get(roomId);
+	if (!roomState) {
+		throw new Error(`Room ${roomId} does not exist`);
+	}
+
+	roomState.participants.add(socketId);
+	console.log(`Socket ${socketId} joined room ${roomId}`);
+	return roomState;
+}
+
+function leaveRoom(roomId: string, socketId: string): void {
+	const roomState = rooms.get(roomId);
+	if (!roomState) return;
+
+	roomState.participants.delete(socketId);
+
+	// Clean up transports, producers, and consumers for this socket
+	const transportsForSocket = roomState.transports.get(socketId);
+	const producerList = roomState.producers.get(socketId);
+
+	if (transportsForSocket) {
+		if (transportsForSocket.producer) transportsForSocket.producer.close();
+		if (transportsForSocket.consumer) transportsForSocket.consumer.close();
+		roomState.transports.delete(socketId);
+	}
+
+	if (producerList) {
+		producerList.forEach((producer) => producer.close());
+		roomState.producers.delete(socketId);
+	}
+
+	// Clean up consumers for this socket
+	for (const [consumerId, consumer] of roomState.consumers) {
+		if (consumer.appData?.socketId === socketId) {
+			consumer.close();
+			roomState.consumers.delete(consumerId);
+		}
+	}
+
+	console.log(`Socket ${socketId} left room ${roomId}`);
+
+	// Clean up empty rooms
+	if (roomState.participants.size === 0) {
+		roomState.router.close();
+		rooms.delete(roomId);
+		console.log(`Room ${roomId} deleted (empty)`);
+	}
+}
+
+async function initMediasoup() {
+	worker = await mediasoup.createWorker({
+		logLevel: "debug",
+		rtcMinPort: 10000,
+		rtcMaxPort: 10100,
+	});
+
+	// Create legacy router for backward compatibility
+	legacyRouter = await worker.createRouter({
+		mediaCodecs: [
+			{
+				kind: "audio",
+				mimeType: "audio/opus",
+				clockRate: 48000,
+				channels: 2,
+			},
+			{
+				kind: "video",
+				mimeType: "video/H264",
+				clockRate: 90000,
+				parameters: {
+					"packetization-mode": 1,
+					"profile-level-id": "42001f", // Baseline profile
+					"level-asymmetry-allowed": 1,
+					"x-google-start-bitrate": 1000,
+				},
+			},
+		],
+	});
+
+	console.log("Mediasoup worker and legacy router initialized");
 }
 
 // Function to find available ports
@@ -415,17 +523,19 @@ function generateCompositeSDP(
 function monitorHLSStream(streamId: string, socketId: string) {
 	const streamDir = `${HLS_DIR}/${streamId}`;
 	const streamPath = `${streamDir}/stream.m3u8`;
-	
+
 	const checkStream = () => {
 		// Check if the playlist file exists and has content
 		if (fs.existsSync(streamPath)) {
 			try {
-				const content = fs.readFileSync(streamPath, 'utf-8');
+				const content = fs.readFileSync(streamPath, "utf-8");
 				// Check if playlist has at least one segment
-				if (content.includes('.ts')) {
-					console.log(`HLS stream ${streamId} is ready - emitting event to ${socketId}`);
+				if (content.includes(".ts")) {
+					console.log(
+						`HLS stream ${streamId} is ready - emitting event to ${socketId}`,
+					);
 					// Emit to the specific socket that requested the stream
-					io.to(socketId).emit('hlsStreamReady', { streamId });
+					io.to(socketId).emit("hlsStreamReady", { streamId });
 					return true;
 				}
 			} catch (error) {
@@ -434,22 +544,27 @@ function monitorHLSStream(streamId: string, socketId: string) {
 		}
 		return false;
 	};
-	
+
 	// Check immediately and then every 1 second for up to 30 seconds
 	let attempts = 0;
 	const maxAttempts = 30;
-	
+
 	const interval = setInterval(() => {
 		attempts++;
-		
+
 		if (checkStream()) {
 			clearInterval(interval);
 			return;
 		}
-		
+
 		if (attempts >= maxAttempts) {
-			console.warn(`HLS stream ${streamId} failed to initialize after ${maxAttempts} seconds`);
-			io.to(socketId).emit('hlsStreamFailed', { streamId, error: 'Stream failed to initialize' });
+			console.warn(
+				`HLS stream ${streamId} failed to initialize after ${maxAttempts} seconds`,
+			);
+			io.to(socketId).emit("hlsStreamFailed", {
+				streamId,
+				error: "Stream failed to initialize",
+			});
 			clearInterval(interval);
 		}
 	}, 1000);
@@ -465,6 +580,9 @@ async function createCompositeHLSStream(
 	if (audioProducers.length === 0 && videoProducers.length === 0) {
 		throw new Error("At least one producer (audio or video) is required");
 	}
+
+	// Use legacy router for HLS streaming (we need a router reference)
+	const router = legacyRouter;
 
 	// Create stream directory
 	const streamDir = `${HLS_DIR}/${streamId}`;
@@ -732,6 +850,9 @@ async function _createHLSStream(
 		throw new Error("At least one producer (audio or video) is required");
 	}
 
+	// Use legacy router for HLS streaming
+	const router = legacyRouter;
+
 	// Create stream directory
 	const streamDir = `${HLS_DIR}/${streamId}`;
 	if (!existsSync(streamDir)) {
@@ -771,26 +892,27 @@ async function _createHLSStream(
 		});
 
 		// Create consumer for audio (paused initially)
-		audioConsumer = await audioTransport.consume({
-			producerId: audioProducer.id,
-			rtpCapabilities: router.rtpCapabilities,
-			paused: true, // Start paused to avoid timing issues
-		});
+		if (audioTransport) {
+			audioConsumer = await audioTransport.consume({
+				producerId: audioProducer.id,
+				rtpCapabilities: router.rtpCapabilities,
+				paused: true, // Start paused to avoid timing issues
+			});
 
-		// Connect transport to FFmpeg's listening ports
-		await audioTransport.connect({
-			ip: "127.0.0.1",
-			port: audioRtpPort,
-			rtcpPort: audioRtcpPort,
-		});
-
-		console.log(
-			`Audio PlainTransport connected to FFmpeg on ports ${audioRtpPort}/${audioRtcpPort}`,
-		);
-		console.log(
-			"Audio Consumer RTP Parameters:",
-			JSON.stringify(audioConsumer.rtpParameters, null, 2),
-		);
+			// Connect transport to FFmpeg's listening ports
+			await audioTransport.connect({
+				ip: "127.0.0.1",
+				port: audioRtpPort,
+				rtcpPort: audioRtcpPort,
+			});
+			console.log(
+				`Audio PlainTransport connected to FFmpeg on ports ${audioRtpPort}/${audioRtcpPort}`,
+			);
+			console.log(
+				"Audio Consumer RTP Parameters:",
+				JSON.stringify(audioConsumer.rtpParameters, null, 2),
+			);
+		}
 	}
 
 	if (videoProducer && videoRtpPort && videoRtcpPort) {
@@ -801,26 +923,27 @@ async function _createHLSStream(
 		});
 
 		// Create consumer for video (paused initially)
-		videoConsumer = await videoTransport.consume({
-			producerId: videoProducer.id,
-			rtpCapabilities: router.rtpCapabilities,
-			paused: true, // Start paused to avoid timing issues
-		});
+		if (videoTransport) {
+			videoConsumer = await videoTransport.consume({
+				producerId: videoProducer.id,
+				rtpCapabilities: router.rtpCapabilities,
+				paused: true, // Start paused to avoid timing issues
+			});
 
-		// Connect transport to FFmpeg's listening ports
-		await videoTransport.connect({
-			ip: "127.0.0.1",
-			port: videoRtpPort,
-			rtcpPort: videoRtcpPort,
-		});
-
-		console.log(
-			`Video PlainTransport connected to FFmpeg on ports ${videoRtpPort}/${videoRtcpPort}`,
-		);
-		console.log(
-			"Video Consumer RTP Parameters:",
-			JSON.stringify(videoConsumer.rtpParameters, null, 2),
-		);
+			// Connect transport to FFmpeg's listening ports
+			await videoTransport.connect({
+				ip: "127.0.0.1",
+				port: videoRtpPort,
+				rtcpPort: videoRtcpPort,
+			});
+			console.log(
+				`Video PlainTransport connected to FFmpeg on ports ${videoRtpPort}/${videoRtcpPort}`,
+			);
+			console.log(
+				"Video Consumer RTP Parameters:",
+				JSON.stringify(videoConsumer.rtpParameters, null, 2),
+			);
+		}
 	}
 
 	// Create SDP file for FFmpeg
@@ -1020,18 +1143,104 @@ function stopHLSStream(streamId: string) {
 	console.log(`HLS stream stopped for ${streamId}`);
 }
 
-// Socket.IO connection handling
+// Socket.IO connection handling with room support
 io.on("connection", (socket) => {
 	console.log(`Client connected: ${socket.id}`);
+	let currentRoomId: string | null = null;
 
-	socket.on("getRtpCapabilities", (callback) => {
-		const rtpCapabilities = router.rtpCapabilities;
-		callback({ rtpCapabilities });
+	// Room management events
+	socket.on("joinRoom", async (data) => {
+		try {
+			const { roomId } = data;
+			currentRoomId = roomId;
+
+			// Create room if it doesn't exist
+			await createRoom(roomId);
+
+			// Join the room
+			joinRoom(roomId, socket.id);
+
+			// Emit participant count to room
+			const roomState = getRoomState(roomId);
+			if (roomState) {
+				io.emit("roomParticipantCount", {
+					roomId,
+					count: roomState.participants.size,
+				});
+			}
+
+			console.log(`Socket ${socket.id} joined room ${roomId}`);
+		} catch (error) {
+			console.error("Error joining room:", error);
+		}
+	});
+
+	socket.on("leaveRoom", (data) => {
+		const { roomId } = data;
+		if (roomId) {
+			leaveRoom(roomId, socket.id);
+			currentRoomId = null;
+
+			// Emit updated participant count
+			const roomState = getRoomState(roomId);
+			if (roomState) {
+				io.emit("roomParticipantCount", {
+					roomId,
+					count: roomState.participants.size,
+				});
+			}
+		}
+	});
+
+	// WebRTC events (support both room-based and legacy)
+	socket.on("getRtpCapabilities", (data, callback) => {
+		try {
+			const { roomId } = data || {};
+			let targetRouter: mediasoup.types.Router;
+
+			if (roomId) {
+				const roomState = getRoomState(roomId);
+				if (!roomState) {
+					callback({ error: "Room not found" });
+					return;
+				}
+				targetRouter = roomState.router;
+			} else {
+				// Legacy support
+				targetRouter = legacyRouter;
+			}
+
+			const rtpCapabilities = targetRouter.rtpCapabilities;
+			callback({ rtpCapabilities });
+		} catch (error) {
+			console.error("Error getting RTP capabilities:", error);
+			callback({
+				error: error instanceof Error ? error.message : "Unknown error",
+			});
+		}
 	});
 
 	socket.on("createWebRtcTransport", async (data, callback) => {
 		try {
-			const transport = await router.createWebRtcTransport({
+			const { roomId, type } = data || {};
+			let targetRouter: mediasoup.types.Router;
+			let targetTransports: Map<string, SocketTransports>;
+
+			if (roomId) {
+				const roomState = getRoomState(roomId);
+				if (!roomState) {
+					callback({ error: "Room not found" });
+					return;
+				}
+				targetRouter = roomState.router;
+				targetTransports = roomState.transports;
+			} else {
+				// Legacy support
+				targetRouter = legacyRouter;
+				targetTransports = legacyTransports;
+			}
+
+			const transport = await targetRouter.createWebRtcTransport({
 				listenIps: [
 					{
 						ip: "127.0.0.1",
@@ -1044,11 +1253,11 @@ io.on("connection", (socket) => {
 			});
 
 			// Store transport by type (producer or consumer)
-			if (!transports.has(socket.id)) {
-				transports.set(socket.id, {});
+			if (!targetTransports.has(socket.id)) {
+				targetTransports.set(socket.id, {});
 			}
-			const transportType = data?.type || "producer";
-			const socketTransports = transports.get(socket.id);
+			const transportType = type || "producer";
+			const socketTransports = targetTransports.get(socket.id);
 			if (socketTransports) {
 				if (transportType === "producer") {
 					socketTransports.producer = transport;
@@ -1075,14 +1284,29 @@ io.on("connection", (socket) => {
 
 	socket.on("connectTransport", async (data, callback) => {
 		try {
-			const transportsForSocket = transports.get(socket.id);
+			const { roomId, transportId, dtlsParameters } = data;
+			let targetTransports: Map<string, SocketTransports>;
+
+			if (roomId) {
+				const roomState = getRoomState(roomId);
+				if (!roomState) {
+					callback({ error: "Room not found" });
+					return;
+				}
+				targetTransports = roomState.transports;
+			} else {
+				// Legacy support
+				targetTransports = legacyTransports;
+			}
+
+			const transportsForSocket = targetTransports.get(socket.id);
 			if (!transportsForSocket) {
 				throw new Error("No transports found for socket");
 			}
 
 			// Find the transport by ID
 			const transport = Object.values(transportsForSocket).find(
-				(t) => t && t.id === data.transportId,
+				(t) => t && t.id === transportId,
 			);
 
 			if (!transport) {
@@ -1096,7 +1320,7 @@ io.on("connection", (socket) => {
 				return;
 			}
 
-			await transport.connect({ dtlsParameters: data.dtlsParameters });
+			await transport.connect({ dtlsParameters });
 			callback();
 		} catch (error) {
 			console.error("Error connecting transport:", error);
@@ -1108,7 +1332,25 @@ io.on("connection", (socket) => {
 
 	socket.on("produce", async (data, callback) => {
 		try {
-			const transportsForSocket = transports.get(socket.id);
+			const { roomId, kind, rtpParameters } = data;
+			let targetTransports: Map<string, SocketTransports>;
+			let targetProducers: Map<string, mediasoup.types.Producer[]>;
+
+			if (roomId) {
+				const roomState = getRoomState(roomId);
+				if (!roomState) {
+					callback({ error: "Room not found" });
+					return;
+				}
+				targetTransports = roomState.transports;
+				targetProducers = roomState.producers;
+			} else {
+				// Legacy support
+				targetTransports = legacyTransports;
+				targetProducers = legacyProducers;
+			}
+
+			const transportsForSocket = targetTransports.get(socket.id);
 			const transport = transportsForSocket?.producer;
 
 			if (!transport) {
@@ -1116,24 +1358,41 @@ io.on("connection", (socket) => {
 			}
 
 			const producer = await transport.produce({
-				kind: data.kind,
-				rtpParameters: data.rtpParameters,
+				kind,
+				rtpParameters,
 			});
 
 			// Initialize producers array for this socket if it doesn't exist
-			if (!producers.has(socket.id)) {
-				producers.set(socket.id, []);
+			if (!targetProducers.has(socket.id)) {
+				targetProducers.set(socket.id, []);
 			}
-			const producerList = producers.get(socket.id);
+			const producerList = targetProducers.get(socket.id);
 			if (producerList) {
 				producerList.push(producer);
 			}
 
-			// Notify other clients about new producer
-			socket.broadcast.emit("newProducer", {
-				producerId: producer.id,
-				socketId: socket.id,
-			});
+			// Notify other clients about new producer (room-specific or global)
+			if (roomId) {
+				const roomState = getRoomState(roomId);
+				if (roomState) {
+					// Notify only room participants
+					roomState.participants.forEach((participantId) => {
+						if (participantId !== socket.id) {
+							io.to(participantId).emit("newProducer", {
+								producerId: producer.id,
+								socketId: socket.id,
+								roomId,
+							});
+						}
+					});
+				}
+			} else {
+				// Legacy: notify all clients
+				socket.broadcast.emit("newProducer", {
+					producerId: producer.id,
+					socketId: socket.id,
+				});
+			}
 
 			callback({ id: producer.id });
 		} catch (error) {
@@ -1146,7 +1405,31 @@ io.on("connection", (socket) => {
 
 	socket.on("consume", async (data, callback) => {
 		try {
-			const transportsForSocket = transports.get(socket.id);
+			const { roomId, producerSocketId, rtpCapabilities } = data;
+			let targetTransports: Map<string, SocketTransports>;
+			let targetProducers: Map<string, mediasoup.types.Producer[]>;
+			let targetConsumers: Map<string, mediasoup.types.Consumer>;
+			let targetRouter: mediasoup.types.Router;
+
+			if (roomId) {
+				const roomState = getRoomState(roomId);
+				if (!roomState) {
+					callback({ error: "Room not found" });
+					return;
+				}
+				targetTransports = roomState.transports;
+				targetProducers = roomState.producers;
+				targetConsumers = roomState.consumers;
+				targetRouter = roomState.router;
+			} else {
+				// Legacy support
+				targetTransports = legacyTransports;
+				targetProducers = legacyProducers;
+				targetConsumers = legacyConsumers;
+				targetRouter = legacyRouter;
+			}
+
+			const transportsForSocket = targetTransports.get(socket.id);
 			const transport = transportsForSocket?.consumer;
 
 			if (!transport) {
@@ -1154,7 +1437,7 @@ io.on("connection", (socket) => {
 				return;
 			}
 
-			const producerList = producers.get(data.producerSocketId);
+			const producerList = targetProducers.get(producerSocketId);
 
 			if (!producerList || producerList.length === 0) {
 				callback({ error: "No producers found for socket" });
@@ -1164,9 +1447,9 @@ io.on("connection", (socket) => {
 			// Find all consumable producers (both audio and video)
 			const consumableProducers = producerList.filter(
 				(p: mediasoup.types.Producer) =>
-					router.canConsume({
+					targetRouter.canConsume({
 						producerId: p.id,
-						rtpCapabilities: data.rtpCapabilities,
+						rtpCapabilities,
 					}),
 			);
 
@@ -1181,16 +1464,17 @@ io.on("connection", (socket) => {
 			for (const producer of consumableProducers) {
 				const consumer = await transport.consume({
 					producerId: producer.id,
-					rtpCapabilities: data.rtpCapabilities,
+					rtpCapabilities,
 					paused: true,
 					appData: {
 						socketId: socket.id,
-						producerSocketId: data.producerSocketId,
+						producerSocketId,
+						roomId,
 					},
 				});
 
 				// Store consumer by its ID for easier lookup
-				consumers.set(consumer.id, consumer);
+				targetConsumers.set(consumer.id, consumer);
 
 				consumerParams.push({
 					id: consumer.id,
@@ -1202,6 +1486,7 @@ io.on("connection", (socket) => {
 				console.log(
 					`Created consumer for ${consumer.kind} track:`,
 					consumer.id,
+					roomId ? `in room ${roomId}` : "(legacy)",
 				);
 			}
 
@@ -1216,10 +1501,25 @@ io.on("connection", (socket) => {
 
 	socket.on("resume", async (data, callback) => {
 		try {
-			const consumer = consumers.get(data.consumerId);
+			const { consumerId, roomId } = data;
+			let targetConsumers: Map<string, mediasoup.types.Consumer>;
+
+			if (roomId) {
+				const roomState = getRoomState(roomId);
+				if (!roomState) {
+					callback({ error: "Room not found" });
+					return;
+				}
+				targetConsumers = roomState.consumers;
+			} else {
+				// Legacy support
+				targetConsumers = legacyConsumers;
+			}
+
+			const consumer = targetConsumers.get(consumerId);
 
 			if (!consumer) {
-				throw new Error(`Consumer not found: ${data.consumerId}`);
+				throw new Error(`Consumer not found: ${consumerId}`);
 			}
 
 			if (consumer.paused) {
@@ -1235,80 +1535,91 @@ io.on("connection", (socket) => {
 		}
 	});
 
-	socket.on("disconnect", () => {
-		console.log(`Client disconnected: ${socket.id}`);
-		// Clean up resources
-		const transportsForSocket = transports.get(socket.id);
-		const producerList = producers.get(socket.id);
-
-		if (transportsForSocket) {
-			if (transportsForSocket.producer) transportsForSocket.producer.close();
-			if (transportsForSocket.consumer) transportsForSocket.consumer.close();
-		}
-
-		if (producerList) {
-			producerList.forEach((producer) => producer.close());
-		}
-
-		// Clean up consumers for this socket
-		for (const [consumerId, consumer] of consumers) {
-			if (consumer.appData?.socketId === socket.id) {
-				consumer.close();
-				consumers.delete(consumerId);
-			}
-		}
-
-		transports.delete(socket.id);
-		producers.delete(socket.id);
-
-		// Stop any HLS streams for this socket
-		for (const [streamId] of hlsProcesses) {
-			if (streamId.includes(socket.id)) {
-				stopHLSStream(streamId);
-			}
-		}
-
-		// Notify other clients
-		socket.broadcast.emit("producerClosed", { socketId: socket.id });
-	});
-
 	// Send existing producers to new client
-	socket.on("getProducers", (callback) => {
-		const existingProducers: Array<{ producerId: string; socketId: string }> =
-			[];
-		producers.forEach((producerList, socketId) => {
-			if (socketId !== socket.id) {
-				producerList.forEach((producer: mediasoup.types.Producer) => {
-					existingProducers.push({
-						producerId: producer.id,
-						socketId: socketId,
-					});
-				});
+	socket.on("getProducers", (data, callback) => {
+		try {
+			const { roomId } = data || {};
+			let targetProducers: Map<string, mediasoup.types.Producer[]>;
+
+			if (roomId) {
+				const roomState = getRoomState(roomId);
+				if (!roomState) {
+					callback({ error: "Room not found" });
+					return;
+				}
+				targetProducers = roomState.producers;
+			} else {
+				// Legacy support
+				targetProducers = legacyProducers;
 			}
-		});
-		callback(existingProducers);
+
+			const existingProducers: Array<{ producerId: string; socketId: string }> =
+				[];
+			targetProducers.forEach((producerList, socketId) => {
+				if (socketId !== socket.id) {
+					producerList.forEach((producer: mediasoup.types.Producer) => {
+						existingProducers.push({
+							producerId: producer.id,
+							socketId: socketId,
+						});
+					});
+				}
+			});
+			callback(existingProducers);
+		} catch (error) {
+			console.error("Error getting producers:", error);
+			callback({
+				error: error instanceof Error ? error.message : "Unknown error",
+			});
+		}
 	});
 
-	// Start HLS streaming - supports multiple users
-	socket.on("startHLS", async (_data, callback) => {
+	// Enhanced HLS streaming - supports room-based or legacy
+	socket.on("startHLS", async (data, callback) => {
 		try {
-			const streamId = `stream_composite_${Date.now()}`;
-
-			// Collect all producers from all connected users
+			const { roomId } = data || {};
+			let streamId: string;
 			const allAudioProducers: mediasoup.types.Producer[] = [];
 			const allVideoProducers: mediasoup.types.Producer[] = [];
 
-			producers.forEach((producerList, _socketId) => {
-				const audioProducer = producerList.find(
-					(p: mediasoup.types.Producer) => p.kind === "audio",
-				);
-				const videoProducer = producerList.find(
-					(p: mediasoup.types.Producer) => p.kind === "video",
-				);
+			if (roomId) {
+				// Room-based HLS stream
+				streamId = `room_${roomId}_${Date.now()}`;
+				const roomState = getRoomState(roomId);
+				if (!roomState) {
+					callback({ error: "Room not found" });
+					return;
+				}
 
-				if (audioProducer) allAudioProducers.push(audioProducer);
-				if (videoProducer) allVideoProducers.push(videoProducer);
-			});
+				// Collect all producers from room participants
+				roomState.producers.forEach((producerList, _socketId) => {
+					const audioProducer = producerList.find(
+						(p: mediasoup.types.Producer) => p.kind === "audio",
+					);
+					const videoProducer = producerList.find(
+						(p: mediasoup.types.Producer) => p.kind === "video",
+					);
+
+					if (audioProducer) allAudioProducers.push(audioProducer);
+					if (videoProducer) allVideoProducers.push(videoProducer);
+				});
+			} else {
+				// Legacy HLS stream
+				streamId = `stream_composite_${Date.now()}`;
+
+				// Collect all producers from legacy system
+				legacyProducers.forEach((producerList, _socketId) => {
+					const audioProducer = producerList.find(
+						(p: mediasoup.types.Producer) => p.kind === "audio",
+					);
+					const videoProducer = producerList.find(
+						(p: mediasoup.types.Producer) => p.kind === "video",
+					);
+
+					if (audioProducer) allAudioProducers.push(audioProducer);
+					if (videoProducer) allVideoProducers.push(videoProducer);
+				});
+			}
 
 			if (allAudioProducers.length === 0 && allVideoProducers.length === 0) {
 				throw new Error("No producers found for HLS streaming");
@@ -1341,6 +1652,68 @@ io.on("connection", (socket) => {
 				error: error instanceof Error ? error.message : "Unknown error",
 			});
 		}
+	});
+
+	socket.on("disconnect", () => {
+		console.log(`Client disconnected: ${socket.id}`);
+
+		// Clean up room resources if in a room
+		if (currentRoomId) {
+			leaveRoom(currentRoomId, socket.id);
+
+			// Emit updated participant count
+			const roomState = getRoomState(currentRoomId);
+			if (roomState) {
+				io.emit("roomParticipantCount", {
+					roomId: currentRoomId,
+					count: roomState.participants.size,
+				});
+
+				// Notify room participants about producer closure
+				roomState.participants.forEach((participantId) => {
+					io.to(participantId).emit("producerClosed", {
+						socketId: socket.id,
+						roomId: currentRoomId,
+					});
+				});
+			}
+		}
+
+		// Clean up legacy resources
+		const legacyTransportsForSocket = legacyTransports.get(socket.id);
+		const legacyProducerList = legacyProducers.get(socket.id);
+
+		if (legacyTransportsForSocket) {
+			if (legacyTransportsForSocket.producer)
+				legacyTransportsForSocket.producer.close();
+			if (legacyTransportsForSocket.consumer)
+				legacyTransportsForSocket.consumer.close();
+		}
+
+		if (legacyProducerList) {
+			legacyProducerList.forEach((producer) => producer.close());
+		}
+
+		// Clean up legacy consumers for this socket
+		for (const [consumerId, consumer] of legacyConsumers) {
+			if (consumer.appData?.socketId === socket.id) {
+				consumer.close();
+				legacyConsumers.delete(consumerId);
+			}
+		}
+
+		legacyTransports.delete(socket.id);
+		legacyProducers.delete(socket.id);
+
+		// Stop any HLS streams for this socket
+		for (const [streamId] of hlsProcesses) {
+			if (streamId.includes(socket.id)) {
+				stopHLSStream(streamId);
+			}
+		}
+
+		// Notify legacy clients
+		socket.broadcast.emit("producerClosed", { socketId: socket.id });
 	});
 });
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import type { Socket } from "socket.io-client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -20,9 +20,10 @@ interface HLSStopResponse {
 interface HLSControlsProps {
 	socket: Socket | null;
 	isConnected: boolean;
+	roomId?: string;
 }
 
-export function HLSControls({ socket, isConnected }: HLSControlsProps) {
+export function HLSControls({ socket, isConnected, roomId }: HLSControlsProps) {
 	const [hlsUrl, setHlsUrl] = useState("");
 	const [streamId, setStreamId] = useState("");
 	const [isStreaming, setIsStreaming] = useState(false);
@@ -68,7 +69,7 @@ export function HLSControls({ socket, isConnected }: HLSControlsProps) {
 
 		socket.emit(
 			"startHLS",
-			{ socketId: socket.id },
+			{ socketId: socket.id, roomId },
 			(response: HLSStartResponse) => {
 				if (response.error) {
 					alert(`Error starting HLS: ${response.error}`);
@@ -77,7 +78,7 @@ export function HLSControls({ socket, isConnected }: HLSControlsProps) {
 				} else {
 					console.log("HLS streaming started:", response);
 					setStreamStatus("Stream created, waiting for segments...");
-					
+
 					// Store the stream details, but don't set streaming yet
 					// Wait for the hlsStreamReady event from the server
 					setHlsUrl(response?.hlsUrl || "");
@@ -116,17 +117,21 @@ export function HLSControls({ socket, isConnected }: HLSControlsProps) {
 
 	const openWatchPage = () => {
 		if (streamId) {
-			const serverUrl =
-				process.env.NEXT_PUBLIC_SERVER_URL || "http://localhost:3000";
-			const fullUrl = `${serverUrl}${hlsUrl}`;
-			window.open(`/watch?stream=${encodeURIComponent(fullUrl)}`, "_blank");
+			window.open(`/watch/${streamId}`, "_blank");
 		}
 	};
 
 	return (
 		<Card className="mt-4">
 			<CardHeader>
-				<CardTitle>HLS Streaming Controls</CardTitle>
+				<CardTitle>
+					HLS Streaming Controls
+					{roomId && (
+						<span className="ml-2 font-normal text-muted-foreground text-sm">
+							(Room: {roomId})
+						</span>
+					)}
+				</CardTitle>
 			</CardHeader>
 			<CardContent className="space-y-4">
 				<div className="flex gap-2">
