@@ -603,6 +603,13 @@ async function createCompositeHLSStream(
 	// Create consumers for all audio producers
 	for (let i = 0; i < audioProducers.length; i++) {
 		const audioProducer = audioProducers[i];
+		
+		// Skip if producer is closed
+		if (audioProducer.closed) {
+			console.warn(`Skipping closed audio producer ${audioProducer.id}`);
+			continue;
+		}
+		
 		const audioRtpPort = currentPort++;
 		const audioRtcpPort = currentPort++;
 
@@ -635,6 +642,13 @@ async function createCompositeHLSStream(
 	// Create consumers for all video producers
 	for (let i = 0; i < videoProducers.length; i++) {
 		const videoProducer = videoProducers[i];
+		
+		// Skip if producer is closed
+		if (videoProducer.closed) {
+			console.warn(`Skipping closed video producer ${videoProducer.id}`);
+			continue;
+		}
+		
 		const videoRtpPort = currentPort++;
 		const videoRtcpPort = currentPort++;
 
@@ -662,6 +676,14 @@ async function createCompositeHLSStream(
 		console.log(
 			`Video ${i} PlainTransport connected on ports ${videoRtpPort}/${videoRtcpPort}`,
 		);
+	}
+
+	// Validate we have at least one valid producer after filtering
+	if (audioConsumers.length === 0 && videoConsumers.length === 0) {
+		// Close any opened transports
+		audioTransports.forEach(transport => transport.close());
+		videoTransports.forEach(transport => transport.close());
+		throw new Error("No valid producers available - all producers were closed");
 	}
 
 	// Create single composite SDP file with all streams
@@ -1597,33 +1619,51 @@ io.on("connection", (socket) => {
 					return;
 				}
 
-				// Collect all producers from room participants
-				roomState.producers.forEach((producerList, _socketId) => {
+				// Collect all producers from room participants - with real-time validation
+				roomState.producers.forEach((producerList, socketId) => {
+					// Check if participant is still in room
+					if (!roomState.participants.has(socketId)) {
+						console.warn(`Skipping producers for disconnected participant ${socketId}`);
+						return;
+					}
+
 					const audioProducer = producerList.find(
-						(p: mediasoup.types.Producer) => p.kind === "audio",
+						(p: mediasoup.types.Producer) => p.kind === "audio" && !p.closed,
 					);
 					const videoProducer = producerList.find(
-						(p: mediasoup.types.Producer) => p.kind === "video",
+						(p: mediasoup.types.Producer) => p.kind === "video" && !p.closed,
 					);
 
-					if (audioProducer) allAudioProducers.push(audioProducer);
-					if (videoProducer) allVideoProducers.push(videoProducer);
+					if (audioProducer) {
+						console.log(`Adding audio producer ${audioProducer.id} from participant ${socketId}`);
+						allAudioProducers.push(audioProducer);
+					}
+					if (videoProducer) {
+						console.log(`Adding video producer ${videoProducer.id} from participant ${socketId}`);
+						allVideoProducers.push(videoProducer);
+					}
 				});
 			} else {
 				// Legacy HLS stream
 				streamId = `stream_composite_${Date.now()}`;
 
-				// Collect all producers from legacy system
-				legacyProducers.forEach((producerList, _socketId) => {
+				// Collect all producers from legacy system - with validation
+				legacyProducers.forEach((producerList, socketId) => {
 					const audioProducer = producerList.find(
-						(p: mediasoup.types.Producer) => p.kind === "audio",
+						(p: mediasoup.types.Producer) => p.kind === "audio" && !p.closed,
 					);
 					const videoProducer = producerList.find(
-						(p: mediasoup.types.Producer) => p.kind === "video",
+						(p: mediasoup.types.Producer) => p.kind === "video" && !p.closed,
 					);
 
-					if (audioProducer) allAudioProducers.push(audioProducer);
-					if (videoProducer) allVideoProducers.push(videoProducer);
+					if (audioProducer) {
+						console.log(`Adding legacy audio producer ${audioProducer.id} from ${socketId}`);
+						allAudioProducers.push(audioProducer);
+					}
+					if (videoProducer) {
+						console.log(`Adding legacy video producer ${videoProducer.id} from ${socketId}`);
+						allVideoProducers.push(videoProducer);
+					}
 				});
 			}
 
@@ -1631,10 +1671,20 @@ io.on("connection", (socket) => {
 				throw new Error("No producers found for HLS streaming");
 			}
 
+			// Final validation - ensure all producers are still valid before HLS creation
+			const validAudioProducers = allAudioProducers.filter(p => !p.closed);
+			const validVideoProducers = allVideoProducers.filter(p => !p.closed);
+			
+			if (validAudioProducers.length === 0 && validVideoProducers.length === 0) {
+				throw new Error("All producers were closed during HLS preparation");
+			}
+
+			console.log(`Creating HLS stream with ${validAudioProducers.length} audio and ${validVideoProducers.length} video producers`);
+
 			const result = await createCompositeHLSStream(
 				streamId,
-				allAudioProducers,
-				allVideoProducers,
+				validAudioProducers,
+				validVideoProducers,
 				socket.id,
 			);
 			callback(result);
