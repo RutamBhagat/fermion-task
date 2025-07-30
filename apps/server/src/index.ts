@@ -1327,11 +1327,12 @@ io.on("connection", (socket) => {
 			let streamId: string;
 			const allAudioProducers: mediasoup.types.Producer[] = [];
 			const allVideoProducers: mediasoup.types.Producer[] = [];
+			let roomState: RoomState | null = null;
 
 			if (roomId) {
 				// Room-based HLS stream
 				streamId = `room_${roomId}_${Date.now()}`;
-				const roomState = getRoomState(roomId);
+				roomState = getRoomState(roomId);
 				if (!roomState) {
 					callback({ error: "Room not found" });
 					return;
@@ -1340,7 +1341,7 @@ io.on("connection", (socket) => {
 				// Collect all producers from room participants - with real-time validation
 				roomState.producers.forEach((producerList, socketId) => {
 					// Check if participant is still in room
-					if (!roomState.participants.has(socketId)) {
+					if (!roomState?.participants.has(socketId)) {
 						console.warn(`Skipping producers for disconnected participant ${socketId}`);
 						return;
 					}
