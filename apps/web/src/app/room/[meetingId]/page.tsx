@@ -25,7 +25,20 @@ import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { io, type Socket } from "socket.io-client";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { 
+	Mic, 
+	MicOff, 
+	Video, 
+	VideoOff, 
+	Phone, 
+	ScreenShare, 
+	MoreVertical,
+	Copy,
+	Settings,
+	Users
+} from "lucide-react";
+import { toast } from "sonner";
 import { HLSControls } from "../../stream/hls-controls";
 
 interface RemoteParticipant {
@@ -47,6 +60,11 @@ export default function RoomPage() {
 	>([]);
 	const [participantCount, setParticipantCount] = useState(1); // Include self
 	const [hlsPreviewMode, setHlsPreviewMode] = useState(false); // Toggle for HLS preview mode
+	
+	// Media controls state
+	const [isMuted, setIsMuted] = useState(false);
+	const [isVideoOff, setIsVideoOff] = useState(false);
+	const [showControls, setShowControls] = useState(true);
 
 	const localVideoRef = useRef<HTMLVideoElement>(null);
 	const _remoteVideoRefs = useRef<{
@@ -403,7 +421,7 @@ export default function RoomPage() {
 	const copyMeetingLink = () => {
 		const meetingUrl = `${window.location.origin}/room/${meetingId}`;
 		navigator.clipboard.writeText(meetingUrl);
-		// Could add a toast notification here
+		toast.success("Meeting link copied to clipboard");
 	};
 
 	const leaveMeeting = () => {
@@ -412,6 +430,55 @@ export default function RoomPage() {
 		}
 		router.push("/");
 	};
+
+	const toggleMute = () => {
+		if (localStreamRef.current) {
+			const audioTrack = localStreamRef.current.getAudioTracks()[0];
+			if (audioTrack) {
+				audioTrack.enabled = !audioTrack.enabled;
+				setIsMuted(!audioTrack.enabled);
+				toast.success(audioTrack.enabled ? "Microphone on" : "Microphone off");
+			}
+		}
+	};
+
+	const toggleVideo = () => {
+		if (localStreamRef.current) {
+			const videoTrack = localStreamRef.current.getVideoTracks()[0];
+			if (videoTrack) {
+				videoTrack.enabled = !videoTrack.enabled;
+				setIsVideoOff(!videoTrack.enabled);
+				toast.success(videoTrack.enabled ? "Camera on" : "Camera off");
+			}
+		}
+	};
+
+	// Auto-hide controls after 3 seconds of inactivity
+	useEffect(() => {
+		let timeout: NodeJS.Timeout;
+		
+		const hideControls = () => {
+			setShowControls(false);
+		};
+
+		const showControlsTemporary = () => {
+			setShowControls(true);
+			clearTimeout(timeout);
+			timeout = setTimeout(hideControls, 3000);
+		};
+
+		const handleMouseMove = () => {
+			showControlsTemporary();
+		};
+
+		document.addEventListener('mousemove', handleMouseMove);
+		showControlsTemporary(); // Show controls initially
+
+		return () => {
+			document.removeEventListener('mousemove', handleMouseMove);
+			clearTimeout(timeout);
+		};
+	}, []);
 
 	// Calculate grid layout based on participant count (comfortable view)
 	const getGridLayout = (count: number) => {
@@ -454,78 +521,120 @@ export default function RoomPage() {
 	};
 
 	return (
-		<div className="container mx-auto space-y-4 p-4">
-			{/* Meeting Header */}
-			<div className="flex items-center justify-between">
-				<div>
-					<h1 className="font-bold text-2xl">Meeting: {meetingId}</h1>
-					<p className="text-muted-foreground text-sm">{status}</p>
-				</div>
-				<div className="flex items-center gap-2">
-					<span className="text-muted-foreground text-sm">
-						{participantCount} participant{participantCount !== 1 ? "s" : ""}
-					</span>
-					<Button 
-						variant={hlsPreviewMode ? "default" : "outline"} 
-						size="sm" 
-						onClick={() => setHlsPreviewMode(!hlsPreviewMode)}
-						title={hlsPreviewMode ? "Switch to comfortable view" : "Preview how you'll look in HLS stream"}
-					>
-						{hlsPreviewMode ? "📺 HLS Preview" : "👁️ Preview HLS"}
-					</Button>
-					<Button variant="outline" size="sm" onClick={copyMeetingLink}>
-						Copy Link
-					</Button>
-					<Button variant="destructive" size="sm" onClick={leaveMeeting}>
-						Leave
-					</Button>
+		<div className="relative h-screen w-screen bg-black overflow-hidden">
+			{/* Top Bar - Only visible when controls are shown */}
+			<div className={`absolute top-0 left-0 right-0 z-20 bg-gradient-to-b from-black/50 to-transparent p-4 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0'}`}>
+				<div className="flex items-center justify-between text-white">
+					<div className="flex items-center gap-4">
+						<h1 className="font-medium text-lg">{meetingId}</h1>
+						<div className="flex items-center gap-2 text-sm text-gray-300">
+							<Users className="h-4 w-4" />
+							<span>{participantCount}</span>
+						</div>
+					</div>
+					<div className="flex items-center gap-2">
+						<Tooltip>
+							<TooltipTrigger asChild>
+								<Button 
+									variant="ghost" 
+									size="sm" 
+									onClick={() => setHlsPreviewMode(!hlsPreviewMode)}
+									className="text-white hover:bg-white/20"
+								>
+									{hlsPreviewMode ? "📺" : "👁️"}
+								</Button>
+							</TooltipTrigger>
+							<TooltipContent>
+								{hlsPreviewMode ? "Switch to comfortable view" : "Preview HLS layout"}
+							</TooltipContent>
+						</Tooltip>
+						<Tooltip>
+							<TooltipTrigger asChild>
+								<Button 
+									variant="ghost" 
+									size="sm" 
+									onClick={copyMeetingLink}
+									className="text-white hover:bg-white/20"
+								>
+									<Copy className="h-4 w-4" />
+								</Button>
+							</TooltipTrigger>
+							<TooltipContent>Copy meeting link</TooltipContent>
+						</Tooltip>
+						<Tooltip>
+							<TooltipTrigger asChild>
+								<Button 
+									variant="ghost" 
+									size="sm"
+									className="text-white hover:bg-white/20"
+								>
+									<Settings className="h-4 w-4" />
+								</Button>
+							</TooltipTrigger>
+							<TooltipContent>Settings</TooltipContent>
+						</Tooltip>
+					</div>
 				</div>
 			</div>
 
-			{/* Video Grid */}
+			{/* HLS Preview Banner */}
 			{hlsPreviewMode && (
-				<div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-blue-800 text-sm">
+				<div className="absolute top-16 left-4 right-4 z-20 bg-blue-600/90 backdrop-blur-sm border border-blue-400 rounded-lg p-3 text-white text-sm">
 					<div className="flex items-center gap-2">
 						<span className="font-medium">📺 HLS Preview Mode:</span>
 						<span>This is exactly how you'll appear in the final stream recording</span>
 					</div>
 				</div>
 			)}
+
+			{/* Main Video Grid - Full Screen */}
 			<div
-				className={`grid gap-4 ${
+				className={`h-full w-full grid gap-1 ${
 					hlsPreviewMode 
 						? getHlsGridLayout(participantCount).gridClass 
 						: getGridLayout(participantCount)
-				} min-h-[60vh] auto-rows-fr`}
+				} p-2`}
 			>
 				{/* Local Video */}
-				<Card className="relative">
-					<CardContent className="p-2">
-						<div className="relative">
-							<video
-								ref={localVideoRef}
-								autoPlay
-								muted
-								className={
-									hlsPreviewMode 
-										? "w-full rounded-lg bg-gray-900 object-cover"
-										: "aspect-video w-full rounded-lg bg-gray-900"
-								}
-								style={
-									hlsPreviewMode 
-										? { aspectRatio: getHlsGridLayout(participantCount).aspectRatio }
-										: undefined
-								}
-								aria-label="Your video"
-							>
-								<track kind="captions" srcLang="en" label="English" />
-							</video>
-							<div className="absolute bottom-2 left-2 rounded bg-black/70 px-2 py-1 text-white text-xs">
-								You
+				<div className="relative bg-gray-900 rounded-lg overflow-hidden">
+					<video
+						ref={localVideoRef}
+						autoPlay
+						muted
+						className={
+							hlsPreviewMode 
+								? "w-full h-full object-cover"
+								: "w-full h-full object-cover"
+						}
+						style={
+							hlsPreviewMode 
+								? { aspectRatio: getHlsGridLayout(participantCount).aspectRatio }
+								: undefined
+						}
+						aria-label="Your video"
+					>
+						<track kind="captions" srcLang="en" label="English" />
+					</video>
+					{/* Video overlay indicators */}
+					<div className="absolute bottom-2 left-2 flex items-center gap-2">
+						<div className="rounded bg-black/70 px-2 py-1 text-white text-xs font-medium">
+							You
+						</div>
+						{isMuted && (
+							<div className="rounded-full bg-red-600 p-1">
+								<MicOff className="h-3 w-3 text-white" />
+							</div>
+						)}
+					</div>
+					{isVideoOff && (
+						<div className="absolute inset-0 bg-gray-800 flex items-center justify-center">
+							<div className="text-center text-white">
+								<VideoOff className="h-8 w-8 mx-auto mb-2" />
+								<p className="text-sm">Camera is off</p>
 							</div>
 						</div>
-					</CardContent>
-				</Card>
+					)}
+				</div>
 
 				{/* Remote Participants */}
 				{remoteParticipants.map((participant) => {
@@ -533,101 +642,159 @@ export default function RoomPage() {
 					const _participantStream = participant.stream;
 
 					return (
-						<Card key={participantSocketId} className="relative">
-							<CardContent className="p-2">
-								<div className="relative">
-									<video
-										ref={(videoElement) => {
-											// biome-ignore lint/style/noParameterAssign: React ref callback pattern
-											if (videoElement) {
-												// biome-ignore lint/style/noParameterAssign: React ref callback pattern
-												const _element = videoElement;
-												_element.srcObject = _participantStream;
-												_remoteVideoRefs.current[participantSocketId] =
-													_element;
-											}
-										}}
-										autoPlay
-										className={
-											hlsPreviewMode 
-												? "w-full rounded-lg bg-gray-900 object-cover"
-												: "aspect-video w-full rounded-lg bg-gray-900"
-										}
-										style={
-											hlsPreviewMode 
-												? { aspectRatio: getHlsGridLayout(participantCount).aspectRatio }
-												: undefined
-										}
-										aria-label={`Participant ${participantSocketId}`}
-									>
-										<track kind="captions" srcLang="en" label="English" />
-									</video>
-									<div className="absolute bottom-2 left-2 rounded bg-black/70 px-2 py-1 text-white text-xs">
-										{participantSocketId.slice(-6)}
-									</div>
-								</div>
-							</CardContent>
-						</Card>
+						<div key={participantSocketId} className="relative bg-gray-900 rounded-lg overflow-hidden">
+							<video
+								ref={(videoElement) => {
+									if (videoElement) {
+										const _element = videoElement;
+										_element.srcObject = _participantStream;
+										_remoteVideoRefs.current[participantSocketId] = _element;
+									}
+								}}
+								autoPlay
+								className="w-full h-full object-cover"
+								style={
+									hlsPreviewMode 
+										? { aspectRatio: getHlsGridLayout(participantCount).aspectRatio }
+										: undefined
+								}
+								aria-label={`Participant ${participantSocketId}`}
+							>
+								<track kind="captions" srcLang="en" label="English" />
+							</video>
+							<div className="absolute bottom-2 left-2 rounded bg-black/70 px-2 py-1 text-white text-xs font-medium">
+								{participantSocketId.slice(-6)}
+							</div>
+						</div>
 					);
 				})}
 
-				{/* Empty slots for better visual balance */}
-				{participantCount < 4 &&
-					Array.from({ length: 4 - participantCount }, (_, index) => index).map(
+				{/* Empty slots for better visual balance - only show when not many participants */}
+				{participantCount <= 2 &&
+					Array.from({ length: Math.max(0, 2 - participantCount) }, (_, index) => index).map(
 						(emptySlot) => (
-							<Card
+							<div
 								key={`empty-slot-${participantCount}-${emptySlot}`}
-								className="opacity-30"
+								className="bg-gray-800/30 rounded-lg flex items-center justify-center"
 							>
-								<CardContent className="p-2">
-									<div className="flex aspect-video w-full items-center justify-center rounded-lg bg-gray-200 dark:bg-gray-800">
-										<span className="text-gray-400 text-sm">
-											Waiting for participants...
-										</span>
-									</div>
-								</CardContent>
-							</Card>
+								<div className="text-center text-gray-400">
+									<Users className="h-8 w-8 mx-auto mb-2 opacity-50" />
+									<p className="text-sm">Waiting for participants...</p>
+								</div>
+							</div>
 						),
 					)}
 			</div>
 
-			{/* Controls */}
-			<Card>
-				<CardHeader>
-					<CardTitle>Meeting Controls</CardTitle>
-				</CardHeader>
-				<CardContent className="space-y-4">
-					<div className="flex gap-4">
-						<Button
-							onClick={startProducing}
-							disabled={!deviceRef.current || isProducing}
-							className="flex-1"
-						>
-							{isProducing ? "Camera On" : "Join with Camera"}
-						</Button>
-					</div>
+			{/* Bottom Control Bar - Google Meet Style */}
+			<div className={`absolute bottom-0 left-0 right-0 z-20 bg-gradient-to-t from-black/50 to-transparent p-6 transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0'}`}>
+				<div className="flex items-center justify-center gap-4">
+					{/* Mic Control */}
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<Button
+								onClick={toggleMute}
+								size="lg"
+								variant={isMuted ? "destructive" : "secondary"}
+								className={`h-12 w-12 rounded-full ${isMuted ? 'bg-red-600 hover:bg-red-700' : 'bg-gray-700 hover:bg-gray-600'}`}
+							>
+								{isMuted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
+							</Button>
+						</TooltipTrigger>
+						<TooltipContent>{isMuted ? "Unmute" : "Mute"}</TooltipContent>
+					</Tooltip>
 
-					<div className="text-muted-foreground text-sm">
-						<p>
-							Connection: {isConnected ? "🟢 Connected" : "🔴 Disconnected"}
-						</p>
-						<p>Device Ready: {deviceRef.current ? "🟢 Yes" : "🔴 No"}</p>
-						<p>
-							Streaming: {isProducing ? "🟢 Yes" : "🔴 No"} (
-							{producersRef.current.length} tracks)
-						</p>
-						<p>Participants: {participantCount}</p>
-						<p>Remote Streams: {remoteParticipants.length}</p>
-					</div>
-				</CardContent>
-			</Card>
+					{/* Video Control */}
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<Button
+								onClick={toggleVideo}
+								size="lg"
+								variant={isVideoOff ? "destructive" : "secondary"}
+								className={`h-12 w-12 rounded-full ${isVideoOff ? 'bg-red-600 hover:bg-red-700' : 'bg-gray-700 hover:bg-gray-600'}`}
+							>
+								{isVideoOff ? <VideoOff className="h-5 w-5" /> : <Video className="h-5 w-5" />}
+							</Button>
+						</TooltipTrigger>
+						<TooltipContent>{isVideoOff ? "Turn on camera" : "Turn off camera"}</TooltipContent>
+					</Tooltip>
 
-			{/* HLS Controls */}
-			<HLSControls
-				socket={socketRef.current}
-				isConnected={isConnected}
-				roomId={meetingId}
-			/>
+					{/* Join/Leave Call Button */}
+					{!isProducing ? (
+						<Tooltip>
+							<TooltipTrigger asChild>
+								<Button
+									onClick={startProducing}
+									disabled={!deviceRef.current}
+									size="lg"
+									className="h-12 px-6 bg-green-600 hover:bg-green-700 text-white rounded-full"
+								>
+									Join Call
+								</Button>
+							</TooltipTrigger>
+							<TooltipContent>Join the meeting</TooltipContent>
+						</Tooltip>
+					) : (
+						<Tooltip>
+							<TooltipTrigger asChild>
+								<Button
+									onClick={leaveMeeting}
+									size="lg"
+									variant="destructive"
+									className="h-12 w-12 rounded-full bg-red-600 hover:bg-red-700"
+								>
+									<Phone className="h-5 w-5 rotate-[135deg]" />
+								</Button>
+							</TooltipTrigger>
+							<TooltipContent>Leave call</TooltipContent>
+						</Tooltip>
+					)}
+
+					{/* Screen Share */}
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<Button
+								size="lg"
+								variant="secondary"
+								className="h-12 w-12 rounded-full bg-gray-700 hover:bg-gray-600"
+							>
+								<ScreenShare className="h-5 w-5" />
+							</Button>
+						</TooltipTrigger>
+						<TooltipContent>Share screen</TooltipContent>
+					</Tooltip>
+
+					{/* More Options */}
+					<Tooltip>
+						<TooltipTrigger asChild>
+							<Button
+								size="lg"
+								variant="secondary"
+								className="h-12 w-12 rounded-full bg-gray-700 hover:bg-gray-600"
+							>
+								<MoreVertical className="h-5 w-5" />
+							</Button>
+						</TooltipTrigger>
+						<TooltipContent>More options</TooltipContent>
+					</Tooltip>
+				</div>
+				
+				{/* Status indicator - only shown when not connected/producing */}
+				{(!isConnected || !isProducing) && (
+					<div className="text-center mt-2">
+						<p className="text-white text-sm">{status}</p>
+					</div>
+				)}
+			</div>
+
+			{/* Hidden HLS Controls - can be toggled via settings */}
+			<div className="hidden">
+				<HLSControls
+					socket={socketRef.current}
+					isConnected={isConnected}
+					roomId={meetingId}
+				/>
+			</div>
 		</div>
 	);
 }
