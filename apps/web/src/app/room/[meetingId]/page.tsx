@@ -42,7 +42,6 @@ import {
   Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
-import { HLSControls } from "../../stream/hls-controls";
 
 interface RemoteParticipant {
   socketId: string;
@@ -933,15 +932,6 @@ export default function RoomPage() {
             <p className="text-white text-sm">{status}</p>
           </div>
         )}
-      </div>
-
-      {/* Hidden HLS Controls - can be toggled via settings */}
-      <div className="hidden">
-        <HLSControls
-          socket={socketRef.current}
-          isConnected={isConnected}
-          roomId={meetingId}
-        />
       </div>
     </div>
   );
