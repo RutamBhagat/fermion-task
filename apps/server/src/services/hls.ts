@@ -311,6 +311,12 @@ function buildFFmpegArgs(
 			"30",
 			"-bf",
 			"0",
+			"-g",
+			"30",
+			"-strict-gop",
+			"1",
+			"-max_delay",
+			"0",
 		);
 	}
 
