@@ -313,8 +313,6 @@ function buildFFmpegArgs(
 			"0",
 			"-g",
 			"30",
-			"-strict-gop",
-			"1",
 			"-max_delay",
 			"0",
 		);
