@@ -3,6 +3,7 @@ import type { Server, Socket } from "socket.io";
 import type { SocketTransports } from "@/types/index.js";
 import { webRtcTransportOptions } from "../config/mediasoup.js";
 import {
+	cleanupOldStreams,
 	createCompositeHLSStream,
 	getHLSProcesses,
 	stopHLSStream,

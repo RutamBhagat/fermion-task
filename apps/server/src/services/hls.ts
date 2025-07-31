@@ -1,5 +1,6 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
+import { readdir, rm } from "node:fs/promises";
 import type * as mediasoup from "mediasoup";
 import type { Server } from "socket.io";
 import type { HLSStreamResult, PlainTransports } from "@/types/index.js";
@@ -361,6 +362,43 @@ export function stopHLSStream(streamId: string) {
 
 	streamSocketMap.delete(streamId);
 	console.log(`HLS stream stopped for ${streamId}`);
+	
+	// Clean up old streams, keeping only the current one
+	cleanupOldStreams(streamId);
+}
+
+export async function cleanupOldStreams(currentStreamId: string) {
+	try {
+		if (!existsSync(HLS_DIR)) {
+			return;
+		}
+
+		const streamDirs = await readdir(HLS_DIR, { withFileTypes: true });
+		const dirsToDelete = streamDirs
+			.filter(dirent => dirent.isDirectory() && dirent.name !== currentStreamId)
+			.map(dirent => dirent.name);
+
+		if (dirsToDelete.length === 0) {
+			console.log(`No old streams to clean up`);
+			return;
+		}
+
+		console.log(`Cleaning up ${dirsToDelete.length} old stream directories:`, dirsToDelete);
+
+		for (const dirName of dirsToDelete) {
+			const dirPath = `${HLS_DIR}/${dirName}`;
+			try {
+				await rm(dirPath, { recursive: true, force: true });
+				console.log(`Deleted old stream directory: ${dirPath}`);
+			} catch (error) {
+				console.error(`Failed to delete stream directory ${dirPath}:`, error);
+			}
+		}
+
+		console.log(`Stream cleanup completed. Kept current stream: ${currentStreamId}`);
+	} catch (error) {
+		console.error('Error during stream cleanup:', error);
+	}
 }
 
 export function getHLSProcesses(): Map<string, ChildProcess> {
