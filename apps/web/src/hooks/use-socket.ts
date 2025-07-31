@@ -41,7 +41,7 @@ export function useSocket({ url, roomId }: UseSocketOptions) {
 	}, [roomId]);
 
 	useEffect(() => {
-		const _socket = connect();
+		connect();
 
 		return () => {
 			disconnect();

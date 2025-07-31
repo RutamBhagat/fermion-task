@@ -19,7 +19,7 @@ export default function RoomPage() {
 	const meetingId = params.meetingId as string;
 
 	const [status, setStatus] = useState("Connecting to meeting...");
-	const [hlsPreviewMode, _setHlsPreviewMode] = useState(false);
+	const [hlsPreviewMode] = useState(false);
 
 	const { socket, isConnected } = useSocket({
 		url: process.env.NEXT_PUBLIC_SERVER_URL,

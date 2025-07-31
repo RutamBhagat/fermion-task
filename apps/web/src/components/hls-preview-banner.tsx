@@ -12,7 +12,7 @@ export function HlsPreviewBanner({ show }: HlsPreviewBannerProps) {
 			<div className="flex items-center gap-2">
 				<span className="font-medium">📺 HLS Preview Mode:</span>
 				<span>
-					This is exactly how you'll appear in the final stream recording
+					This is exactly how you will appear in the final stream recording
 				</span>
 			</div>
 		</div>
