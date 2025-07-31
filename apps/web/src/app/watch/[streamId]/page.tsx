@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
 
 interface HlsConfig {
 	enableWorker?: boolean;
@@ -73,7 +73,7 @@ export default function WatchStreamPage() {
 		if (isHlsLoaded && streamId) {
 			loadStream();
 		}
-	}, [isHlsLoaded, streamId]);
+	}, [isHlsLoaded, streamId, loadStream]);
 
 	const loadStream = async () => {
 		if (!videoRef.current) return;
@@ -104,24 +104,24 @@ export default function WatchStreamPage() {
 					(_event: Event, data?: HlsErrorData) => {
 						if (!data) return;
 						console.warn("HLS event:", data.details);
-						
+
 						// Handle errors silently, auto-retry for common issues
 						if (data.fatal) {
 							const normalStreamingErrors = [
-								'bufferStalledError',
-								'levelLoadError', 
-								'fragLoadError',
-								'bufferAppendError',
-								'networkError'
+								"bufferStalledError",
+								"levelLoadError",
+								"fragLoadError",
+								"bufferAppendError",
+								"networkError",
 							];
-							
+
 							if (normalStreamingErrors.includes(data.details)) {
 								// Auto-retry silently
 								setTimeout(() => {
 									if (hlsRef.current) {
 										try {
 											hlsRef.current.startLoad();
-										} catch (e) {
+										} catch (_e) {
 											// Silent retry
 										}
 									}
@@ -148,7 +148,7 @@ export default function WatchStreamPage() {
 				autoPlay
 				controls
 				muted
-				className="w-full h-full object-contain"
+				className="h-full w-full object-contain"
 				style={{ backgroundColor: "black" }}
 			>
 				Your browser does not support the video tag.
