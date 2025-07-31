@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
-import { Button } from "@/components/ui/button";
 
 interface HlsConfig {
 	enableWorker?: boolean;
@@ -46,8 +45,6 @@ export default function WatchStreamPage() {
 	const streamId = params.streamId as string;
 	const videoRef = useRef<HTMLVideoElement>(null);
 	const hlsRef = useRef<HlsInstance | null>(null);
-	const [isLoading, setIsLoading] = useState(true);
-	const [error, setError] = useState("");
 	const [isHlsLoaded, setIsHlsLoaded] = useState(false);
 
 	// Construct HLS URL from stream ID
@@ -58,12 +55,10 @@ export default function WatchStreamPage() {
 		const script = document.createElement("script");
 		script.src = "https://cdn.jsdelivr.net/npm/hls.js@latest";
 		script.onload = () => {
-			console.log("HLS.js loaded");
 			setIsHlsLoaded(true);
 		};
 		script.onerror = () => {
-			setError("Failed to load HLS.js library");
-			setIsLoading(false);
+			console.error("Failed to load HLS.js");
 		};
 		document.head.appendChild(script);
 
@@ -75,7 +70,6 @@ export default function WatchStreamPage() {
 	}, []);
 
 	useEffect(() => {
-		// Auto-load stream when HLS.js is ready
 		if (isHlsLoaded && streamId) {
 			loadStream();
 		}
@@ -83,9 +77,6 @@ export default function WatchStreamPage() {
 
 	const loadStream = async () => {
 		if (!videoRef.current) return;
-
-		setIsLoading(true);
-		setError("");
 
 		try {
 			// Clean up previous HLS instance
@@ -97,7 +88,7 @@ export default function WatchStreamPage() {
 			if (window.Hls?.isSupported()) {
 				const hls = new window.Hls({
 					enableWorker: false,
-					debug: true,
+					debug: false,
 				});
 
 				hlsRef.current = hls;
@@ -105,17 +96,38 @@ export default function WatchStreamPage() {
 				hls.attachMedia(videoRef.current);
 
 				hls.on(window.Hls.Events.MANIFEST_PARSED, () => {
-					console.log("HLS manifest parsed, starting playback");
-					setIsLoading(false);
+					// Stream ready, no UI needed
 				});
 
 				hls.on(
 					window.Hls.Events.ERROR,
 					(_event: Event, data?: HlsErrorData) => {
 						if (!data) return;
-						console.error("HLS error:", data);
-						setError(`HLS Error: ${data.details}`);
-						setIsLoading(false);
+						console.warn("HLS event:", data.details);
+						
+						// Handle errors silently, auto-retry for common issues
+						if (data.fatal) {
+							const normalStreamingErrors = [
+								'bufferStalledError',
+								'levelLoadError', 
+								'fragLoadError',
+								'bufferAppendError',
+								'networkError'
+							];
+							
+							if (normalStreamingErrors.includes(data.details)) {
+								// Auto-retry silently
+								setTimeout(() => {
+									if (hlsRef.current) {
+										try {
+											hlsRef.current.startLoad();
+										} catch (e) {
+											// Silent retry
+										}
+									}
+								}, 2000);
+							}
+						}
 					},
 				);
 			} else if (
@@ -123,67 +135,24 @@ export default function WatchStreamPage() {
 			) {
 				// Native HLS support (Safari)
 				videoRef.current.src = hlsUrl;
-				setIsLoading(false);
-			} else {
-				setError("HLS not supported in this browser");
-				setIsLoading(false);
 			}
 		} catch (err) {
-			setError(`Failed to load stream: ${err}`);
-			setIsLoading(false);
+			console.error("Stream error:", err);
 		}
 	};
 
-	const retryLoad = () => {
-		loadStream();
-	};
-
 	return (
-		<div className="container mx-auto max-w-4xl p-6">
-			<h1 className="mb-6 font-bold text-3xl">Watch Stream: {streamId}</h1>
-
-			{error && (
-				<div className="mb-6 rounded border border-red-400 bg-red-100 px-4 py-3 text-red-700">
-					<p>{error}</p>
-					<Button onClick={retryLoad} className="mt-2" variant="outline" size="sm">
-						Retry
-					</Button>
-				</div>
-			)}
-
-			{isLoading && (
-				<div className="mb-6 rounded border border-blue-400 bg-blue-100 px-4 py-3 text-blue-700">
-					Loading stream...
-				</div>
-			)}
-
-			<div className="overflow-hidden rounded-lg bg-black">
-				<video
-					ref={videoRef}
-					controls
-					autoPlay
-					muted
-					className="h-auto w-full"
-					style={{ maxHeight: "70vh" }}
-				>
-					Your browser does not support the video tag.
-				</video>
-			</div>
-
-			<div className="mt-6 text-gray-600 text-sm">
-				<h3 className="mb-2 font-semibold">Stream Details:</h3>
-				<p><strong>Stream ID:</strong> {streamId}</p>
-				<p><strong>HLS URL:</strong> <code className="text-xs">{hlsUrl}</code></p>
-				
-				<div className="mt-4 rounded bg-gray-100 p-3">
-					<p className="font-semibold">Troubleshooting:</p>
-					<ul className="list-inside list-disc space-y-1 text-xs">
-						<li>Ensure the HLS stream is active on the server</li>
-						<li>Check that the stream ID matches the active stream</li>
-						<li>Verify the server is running on the correct port</li>
-					</ul>
-				</div>
-			</div>
+		<div className="h-screen w-screen bg-black">
+			<video
+				ref={videoRef}
+				autoPlay
+				controls
+				muted
+				className="w-full h-full object-contain"
+				style={{ backgroundColor: "black" }}
+			>
+				Your browser does not support the video tag.
+			</video>
 		</div>
 	);
 }
