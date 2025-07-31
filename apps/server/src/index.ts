@@ -715,13 +715,55 @@ async function createCompositeHLSStream(
 
 	let filterComplex = "";
 
-	// Handle video composition
+	// Handle video composition with grid layout
 	if (videoConsumers.length > 1) {
-		// Create side-by-side video layout
-		const videoInputs = videoConsumers
-			.map((_, i) => `[0:${videoStartIndex + i}]`)
-			.join("");
-		filterComplex = `${videoInputs}hstack=inputs=${videoConsumers.length}[v]`;
+		// Create responsive grid layout for video composition
+		const numVideos = videoConsumers.length;
+		
+		// Calculate grid dimensions - optimize for 1080p screens
+		let cols: number, rows: number;
+		if (numVideos <= 2) {
+			cols = 2; rows = 1; // 2x1 layout
+		} else if (numVideos <= 4) {
+			cols = 2; rows = 2; // 2x2 layout
+		} else if (numVideos <= 6) {
+			cols = 3; rows = 2; // 3x2 layout
+		} else if (numVideos <= 9) {
+			cols = 3; rows = 3; // 3x3 layout
+		} else {
+			cols = 4; rows = Math.ceil(numVideos / 4); // 4xN layout for larger groups
+		}
+
+		// Calculate video dimensions for grid - assume 1080p output (1920x1080)
+		const gridWidth = 1920;
+		const gridHeight = 1080;
+		const videoWidth = Math.floor(gridWidth / cols);
+		const videoHeight = Math.floor(gridHeight / rows);
+
+		// First scale all videos to fit grid cells
+		const scaledInputs: string[] = [];
+		for (let i = 0; i < numVideos; i++) {
+			const inputLabel = `scaled${i}`;
+			scaledInputs.push(`[0:${videoStartIndex + i}]scale=${videoWidth}:${videoHeight}:force_original_aspect_ratio=decrease,pad=${videoWidth}:${videoHeight}:(ow-iw)/2:(oh-ih)/2:black[${inputLabel}]`);
+		}
+
+		// Create grid positions for xstack layout - only use actual videos
+		const positions: string[] = [];
+		const xstackInputs: string[] = [];
+		
+		for (let i = 0; i < numVideos; i++) {
+			const row = Math.floor(i / cols);
+			const col = i % cols;
+			const x = col * videoWidth;
+			const y = row * videoHeight;
+			positions.push(`${x}_${y}`);
+			xstackInputs.push(`[scaled${i}]`);
+		}
+
+		// Build the complete filter complex
+		const scaleFilters = scaledInputs.join(';');
+		const xstackFilter = `${xstackInputs.join('')}xstack=inputs=${numVideos}:layout=${positions.join('|')}:fill=black[v]`;
+		filterComplex = `${scaleFilters};${xstackFilter}`;
 	}
 
 	// Handle audio mixing
