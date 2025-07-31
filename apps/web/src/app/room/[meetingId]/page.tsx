@@ -749,12 +749,11 @@ export default function RoomPage() {
 							className="relative overflow-hidden rounded-lg bg-gray-900"
 						>
 							<video
-								ref={(videoElement) => {
-									if (videoElement) {
-										const _element = videoElement;
-										_element.srcObject = _participantStream;
-										_remoteVideoRefs.current[participantSocketId] = _element;
-									}
+								ref={(element) => {
+									if (!element) return;
+									const _videoElement = element;
+									_videoElement.srcObject = _participantStream;
+									_remoteVideoRefs.current[participantSocketId] = _videoElement;
 								}}
 								autoPlay
 								className="h-full w-full object-cover"

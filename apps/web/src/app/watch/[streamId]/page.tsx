@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 interface HlsConfig {
 	enableWorker?: boolean;
@@ -50,32 +50,7 @@ export default function WatchStreamPage() {
 	// Construct HLS URL from stream ID
 	const hlsUrl = `${process.env.NEXT_PUBLIC_SERVER_URL || "http://localhost:3000"}/hls/${streamId}/stream.m3u8`;
 
-	useEffect(() => {
-		// Load HLS.js dynamically
-		const script = document.createElement("script");
-		script.src = "https://cdn.jsdelivr.net/npm/hls.js@latest";
-		script.onload = () => {
-			setIsHlsLoaded(true);
-		};
-		script.onerror = () => {
-			console.error("Failed to load HLS.js");
-		};
-		document.head.appendChild(script);
-
-		return () => {
-			if (hlsRef.current) {
-				hlsRef.current.destroy();
-			}
-		};
-	}, []);
-
-	useEffect(() => {
-		if (isHlsLoaded && streamId) {
-			loadStream();
-		}
-	}, [isHlsLoaded, streamId, loadStream]);
-
-	const loadStream = async () => {
+	const loadStream = useCallback(async () => {
 		if (!videoRef.current) return;
 
 		try {
@@ -139,7 +114,32 @@ export default function WatchStreamPage() {
 		} catch (err) {
 			console.error("Stream error:", err);
 		}
-	};
+	}, [hlsUrl]);
+
+	useEffect(() => {
+		// Load HLS.js dynamically
+		const script = document.createElement("script");
+		script.src = "https://cdn.jsdelivr.net/npm/hls.js@latest";
+		script.onload = () => {
+			setIsHlsLoaded(true);
+		};
+		script.onerror = () => {
+			console.error("Failed to load HLS.js");
+		};
+		document.head.appendChild(script);
+
+		return () => {
+			if (hlsRef.current) {
+				hlsRef.current.destroy();
+			}
+		};
+	}, []);
+
+	useEffect(() => {
+		if (isHlsLoaded && streamId) {
+			loadStream();
+		}
+	}, [isHlsLoaded, streamId, loadStream]);
 
 	return (
 		<div className="h-screen w-screen bg-black">
