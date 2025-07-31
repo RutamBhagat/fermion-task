@@ -138,9 +138,9 @@ app.get("/watch/:streamId", (c) => {
 					hls.on(Hls.Events.ERROR, (event, data) => {
 						console.warn('HLS Error:', data);
 						if (data.fatal) {
-							// For levelLoadError (common when reaching end of live stream at higher speeds),
+							// For common streaming errors (when reaching end of live stream at higher speeds),
 							// show loading spinner instead of error to allow stream to catch up
-							if (data.details === 'levelLoadError' || data.details === 'fragLoadError') {
+							if (data.details === 'levelLoadError' || data.details === 'fragLoadError' || data.details === 'bufferStalledError') {
 								updateStatus('🔄 Stream catching up...', '');
 								status.style.display = 'block';
 								// Try to recover by seeking to live edge

@@ -46,6 +46,7 @@ export default function RoomPage() {
 		RemoteParticipant[]
 	>([]);
 	const [participantCount, setParticipantCount] = useState(1); // Include self
+	const [hlsPreviewMode, setHlsPreviewMode] = useState(false); // Toggle for HLS preview mode
 
 	const localVideoRef = useRef<HTMLVideoElement>(null);
 	const _remoteVideoRefs = useRef<{
@@ -412,12 +413,44 @@ export default function RoomPage() {
 		router.push("/");
 	};
 
-	// Calculate grid layout based on participant count
+	// Calculate grid layout based on participant count (comfortable view)
 	const getGridLayout = (count: number) => {
 		if (count <= 1) return "grid-cols-1";
 		if (count <= 4) return "grid-cols-2";
 		if (count <= 9) return "grid-cols-3";
 		return "grid-cols-4";
+	};
+
+	// Calculate HLS-style grid layout (matches server logic exactly)
+	const getHlsGridLayout = (count: number) => {
+		let cols: number, rows: number;
+		if (count <= 2) {
+			cols = 2; rows = 1; // 2x1 layout
+		} else if (count <= 4) {
+			cols = 2; rows = 2; // 2x2 layout
+		} else if (count <= 6) {
+			cols = 3; rows = 2; // 3x2 layout
+		} else if (count <= 9) {
+			cols = 3; rows = 3; // 3x3 layout
+		} else {
+			cols = 4; rows = Math.ceil(count / 4); // 4xN layout for larger groups
+		}
+
+		// Calculate video dimensions for 1080p grid (matches server exactly)
+		const gridWidth = 1920;
+		const gridHeight = 1080;
+		const videoWidth = Math.floor(gridWidth / cols);
+		const videoHeight = Math.floor(gridHeight / rows);
+
+		return {
+			cols,
+			rows,
+			totalSlots: cols * rows,
+			videoWidth,
+			videoHeight,
+			aspectRatio: videoWidth / videoHeight,
+			gridClass: `grid-cols-${cols}`,
+		};
 	};
 
 	return (
@@ -432,6 +465,14 @@ export default function RoomPage() {
 					<span className="text-muted-foreground text-sm">
 						{participantCount} participant{participantCount !== 1 ? "s" : ""}
 					</span>
+					<Button 
+						variant={hlsPreviewMode ? "default" : "outline"} 
+						size="sm" 
+						onClick={() => setHlsPreviewMode(!hlsPreviewMode)}
+						title={hlsPreviewMode ? "Switch to comfortable view" : "Preview how you'll look in HLS stream"}
+					>
+						{hlsPreviewMode ? "📺 HLS Preview" : "👁️ Preview HLS"}
+					</Button>
 					<Button variant="outline" size="sm" onClick={copyMeetingLink}>
 						Copy Link
 					</Button>
@@ -442,8 +483,20 @@ export default function RoomPage() {
 			</div>
 
 			{/* Video Grid */}
+			{hlsPreviewMode && (
+				<div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-blue-800 text-sm">
+					<div className="flex items-center gap-2">
+						<span className="font-medium">📺 HLS Preview Mode:</span>
+						<span>This is exactly how you'll appear in the final stream recording</span>
+					</div>
+				</div>
+			)}
 			<div
-				className={`grid gap-4 ${getGridLayout(participantCount)} min-h-[60vh] auto-rows-fr`}
+				className={`grid gap-4 ${
+					hlsPreviewMode 
+						? getHlsGridLayout(participantCount).gridClass 
+						: getGridLayout(participantCount)
+				} min-h-[60vh] auto-rows-fr`}
 			>
 				{/* Local Video */}
 				<Card className="relative">
@@ -453,7 +506,16 @@ export default function RoomPage() {
 								ref={localVideoRef}
 								autoPlay
 								muted
-								className="aspect-video w-full rounded-lg bg-gray-900"
+								className={
+									hlsPreviewMode 
+										? "w-full rounded-lg bg-gray-900 object-cover"
+										: "aspect-video w-full rounded-lg bg-gray-900"
+								}
+								style={
+									hlsPreviewMode 
+										? { aspectRatio: getHlsGridLayout(participantCount).aspectRatio }
+										: undefined
+								}
 								aria-label="Your video"
 							>
 								<track kind="captions" srcLang="en" label="English" />
@@ -486,7 +548,16 @@ export default function RoomPage() {
 											}
 										}}
 										autoPlay
-										className="aspect-video w-full rounded-lg bg-gray-900"
+										className={
+											hlsPreviewMode 
+												? "w-full rounded-lg bg-gray-900 object-cover"
+												: "aspect-video w-full rounded-lg bg-gray-900"
+										}
+										style={
+											hlsPreviewMode 
+												? { aspectRatio: getHlsGridLayout(participantCount).aspectRatio }
+												: undefined
+										}
 										aria-label={`Participant ${participantSocketId}`}
 									>
 										<track kind="captions" srcLang="en" label="English" />
