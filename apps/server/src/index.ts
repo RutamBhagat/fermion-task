@@ -138,7 +138,24 @@ app.get("/watch/:streamId", (c) => {
 					hls.on(Hls.Events.ERROR, (event, data) => {
 						console.warn('HLS Error:', data);
 						if (data.fatal) {
-							updateStatus(\`❌ Stream error: \${data.details}\`, 'error');
+							// For levelLoadError (common when reaching end of live stream at higher speeds),
+							// show loading spinner instead of error to allow stream to catch up
+							if (data.details === 'levelLoadError' || data.details === 'fragLoadError') {
+								updateStatus('🔄 Stream catching up...', '');
+								status.style.display = 'block';
+								// Try to recover by seeking to live edge
+								setTimeout(() => {
+									if (hls && !hls.destroyed) {
+										try {
+											hls.startLoad();
+										} catch (e) {
+											console.log('Recovery attempt failed:', e);
+										}
+									}
+								}, 2000);
+							} else {
+								updateStatus(\`❌ Stream error: \${data.details}\`, 'error');
+							}
 						}
 					});
 					
@@ -739,12 +756,15 @@ async function createCompositeHLSStream(
 		const gridHeight = 1080;
 		const videoWidth = Math.floor(gridWidth / cols);
 		const videoHeight = Math.floor(gridHeight / rows);
+		
+		console.log(`Grid layout: ${numVideos} videos, ${cols}x${rows} grid, cell size: ${videoWidth}x${videoHeight}`);
 
-		// First scale all videos to fit grid cells
+		// First scale all videos to fit grid cells with proper aspect ratio and crop if needed
 		const scaledInputs: string[] = [];
 		for (let i = 0; i < numVideos; i++) {
 			const inputLabel = `scaled${i}`;
-			scaledInputs.push(`[0:${videoStartIndex + i}]scale=${videoWidth}:${videoHeight}:force_original_aspect_ratio=decrease,pad=${videoWidth}:${videoHeight}:(ow-iw)/2:(oh-ih)/2:black[${inputLabel}]`);
+			// Scale to fill the entire cell, cropping excess to avoid black bars
+			scaledInputs.push(`[0:${videoStartIndex + i}]scale=${videoWidth}:${videoHeight}:force_original_aspect_ratio=increase,crop=${videoWidth}:${videoHeight}[${inputLabel}]`);
 		}
 
 		// Create grid positions for xstack layout - only use actual videos
@@ -764,6 +784,8 @@ async function createCompositeHLSStream(
 		const scaleFilters = scaledInputs.join(';');
 		const xstackFilter = `${xstackInputs.join('')}xstack=inputs=${numVideos}:layout=${positions.join('|')}:fill=black[v]`;
 		filterComplex = `${scaleFilters};${xstackFilter}`;
+		
+		console.log(`FFmpeg filter_complex: ${filterComplex}`);
 	}
 
 	// Handle audio mixing
