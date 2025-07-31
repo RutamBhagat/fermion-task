@@ -1,52 +1,119 @@
-# fermion-task
+## Common Development Commands
 
-This project was created with [Better-T-Stack](https://github.com/AmanVarshney01/create-better-t-stack), a modern TypeScript stack that combines Next.js, Hono, and more.
+### Development Server
+- `npm install` - Install dependencies for all workspaces
+- `npm run dev` - Start both web and server in development mode (web on :3001, server on :3000)
+- `npm run dev:web` - Start only the Next.js web app (port 3001)
+- `npm run dev:server` - Start only the Hono server (port 3000)
 
-## Features
+### Build & Type Checking
+- `npm run build` - Build all apps using Turbo
+- `npm run check-types` - TypeScript type checking across all workspaces
+- `npm run check` - Run Biome formatting and linting with auto-fix
 
-- **TypeScript** - For type safety and improved developer experience
-- **Next.js** - Full-stack React framework
-- **TailwindCSS** - Utility-first CSS for rapid UI development
-- **shadcn/ui** - Reusable UI components
-- **Hono** - Lightweight, performant server framework
-- **Node.js** - Runtime environment
-- **Turborepo** - Optimized monorepo build system
-- **Biome** - Linting and formatting
+### Individual App Commands
+**Web App** (`apps/web/`):
+- `npm run dev` - Next.js dev server with Turbopack
+- `npm run build` - Production build
+- `npm run start` - Start production build
+- `npm run lint` - ESLint checking
 
-## Getting Started
+**Server** (`apps/server/`):
+- `npm run dev` - Development with tsx watch
+- `npm run build` - Build with tsdown
+- `npm run start` - Start built server
+- `npm run compile` - Compile to binary with Bun
+- `npm run check-types` - TypeScript checking
 
-First, install the dependencies:
+## Architecture Overview
 
-```bash
-npm install
-```
+### Project Structure
+This is a **Turborepo monorepo** with two main applications:
 
+- **`apps/web/`** - Next.js 15 frontend with React 19
+- **`apps/server/`** - Hono server with Socket.IO and Mediasoup
 
-Then, run the development server:
+### Technology Stack
 
-```bash
-npm run dev
-```
+#### Frontend (`apps/web/`)
+- **Framework**: Next.js 15 with React 19 and TypeScript
+- **Styling**: TailwindCSS 4.x with shadcn/ui components
+- **WebRTC**: mediasoup-client for SFU
+- **State Management**: React Query (TanStack Query)
+- **Real-time**: Socket.IO client
+- **Build**: Turbopack for development
 
-Open [http://localhost:3001](http://localhost:3001) in your browser to see the web application.
-The API is running at [http://localhost:3000](http://localhost:3000).
+#### Backend (`apps/server/`)
+- **Framework**: Hono (lightweight Node.js framework)
+- **WebRTC**: Mediasoup SFU for scalable video conferencing
+- **Real-time**: Socket.IO for signaling
+- **Streaming**: HLS stream generation and serving
+- **Runtime**: Node.js with TypeScript
 
+### Key Application Features
 
+#### WebRTC Video Conferencing
+- **P2P Mode**: Direct peer-to-peer connections
+- **SFU Mode**: Scalable video conferencing using Mediasoup
+- **Room System**: Meeting rooms with generated IDs (format: `abc-def-ghi`)
+- **Media Controls**: Camera, microphone, screen sharing controls
 
-## Project Structure
+#### HLS Live Streaming
+- **WebRTC to HLS**: Convert real-time WebRTC streams to HLS format
+- **Watch Pages**: `/watch/[streamId]` for HLS playback
+- **Stream Management**: Automatic cleanup of old HLS segments
 
-```
-fermion-task/
-├── apps/
-│   ├── web/         # Frontend application (Next.js)
-│   └── server/      # Backend API (Hono)
-```
+### Core Hooks and Services
 
-## Available Scripts
+#### Custom Hooks (`apps/web/src/hooks/`)
+- `use-webrtc.ts` - WebRTC connection management
+- `use-socket.ts` - Socket.IO communication
+- `use-media-devices.ts` - Camera/microphone access
+- `use-hls-player.ts` - HLS video player with error recovery
+- `use-hls-stream.ts` - HLS stream management
+- `use-video-grid.ts` - Video layout management
 
-- `npm run dev`: Start all applications in development mode
-- `npm run build`: Build all applications
-- `npm run dev:web`: Start only the web application
-- `npm run dev:server`: Start only the server
-- `npm run check-types`: Check TypeScript types across all apps
-- `npm run check`: Run Biome formatting and linting
+#### Server Services (`apps/server/src/services/`)
+- `mediasoup.ts` - Mediasoup SFU initialization and management
+- `room.ts` - Room state and participant management
+- `hls.ts` - HLS stream generation and cleanup
+- `monitoring.ts` - Performance monitoring
+
+### Important Implementation Details
+
+#### WebRTC Configuration
+- Uses **Mediasoup SFU** for scalable conferencing (not blackbox solutions like LiveKit)
+- **PeerJS fallback** for simple P2P connections
+- HTTPS required for WebRTC (browsers enforce this)
+
+#### HLS Streaming
+- Server generates HLS segments at `/hls/{streamId}/`
+- Automatic stream availability checking with retry logic
+- Clean-up of old HLS directories when streams stop
+
+#### Room Management
+- Meeting IDs generated as 3 segments of 3 lowercase letters (e.g., "abc-def-ghi")
+- Rooms support multiple participants via Mediasoup SFU
+- Socket.IO handles signaling between peers
+
+## Development Workflow
+
+1. **Start Development**: `npm run dev` (starts both web and server)
+2. **Type Checking**: `npm run check-types` before committing
+3. **Code Quality**: `npm run check` for formatting/linting
+4. **Testing WebRTC**: Open multiple browser tabs to simulate multiple users
+5. **HLS Testing**: Create stream, then visit `/watch/[streamId]` to test HLS playback
+
+## Configuration Files
+
+- **`turbo.json`** - Turborepo build pipeline configuration
+- **`biome.json`** - Code formatting and linting rules (tabs, double quotes)
+- **`apps/web/components.json`** - shadcn/ui component configuration
+- **`apps/server/src/config/mediasoup.ts`** - Mediasoup SFU configuration
+
+## Environment Setup
+
+- **Node.js**: Uses npm package manager (v10.9.2)
+- **HTTPS**: Required for WebRTC - use `localhost` with HTTPS in production
+- **Ports**: Web (3001), Server (3000)
+- **CORS**: Server configured for cross-origin requests
