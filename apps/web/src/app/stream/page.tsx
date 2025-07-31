@@ -20,31 +20,26 @@ function generateMeetingId(): string {
 	return segments.join("-");
 }
 
-export default function Home() {
+export default function StreamPage() {
 	const router = useRouter();
 	const [joinCode, setJoinCode] = useState("");
 	const [isCreating, setIsCreating] = useState(false);
 	const [isJoining, setIsJoining] = useState(false);
 
-	const handleCreateMeeting = async () => {
+	const handleCreateMeeting = () => {
 		setIsCreating(true);
 		const meetingId = generateMeetingId();
-
-		// Navigate to the meeting room
 		router.push(`/room/${meetingId}`);
 	};
 
 	const handleJoinMeeting = () => {
 		if (!joinCode.trim()) return;
-
 		setIsJoining(true);
-		// Clean up the join code (remove spaces, convert to lowercase)
 		const cleanCode = joinCode.trim().toLowerCase();
 		router.push(`/room/${cleanCode}`);
 	};
 
 	const handleJoinCodeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-		// Allow only letters, numbers, and hyphens
 		const value = e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "");
 		setJoinCode(value);
 	};
@@ -61,7 +56,6 @@ export default function Home() {
 			</div>
 
 			<div className="mx-auto grid max-w-2xl gap-6">
-				{/* Create New Meeting */}
 				<Card>
 					<CardHeader>
 						<CardTitle className="flex items-center gap-2">
@@ -84,7 +78,6 @@ export default function Home() {
 					</CardContent>
 				</Card>
 
-				{/* Join Meeting */}
 				<Card>
 					<CardHeader>
 						<CardTitle className="flex items-center gap-2">
