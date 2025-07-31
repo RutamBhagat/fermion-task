@@ -32,11 +32,10 @@ import {
 	Video, 
 	VideoOff, 
 	Phone, 
-	ScreenShare, 
-	MoreVertical,
+	Share,
 	Copy,
-	Settings,
-	Users
+	Users,
+	Loader2
 } from "lucide-react";
 import { toast } from "sonner";
 import { HLSControls } from "../../stream/hls-controls";
@@ -65,6 +64,14 @@ export default function RoomPage() {
 	const [isMuted, setIsMuted] = useState(false);
 	const [isVideoOff, setIsVideoOff] = useState(false);
 	const [showControls, setShowControls] = useState(true);
+	
+	// HLS streaming state
+	const [hlsUrl, setHlsUrl] = useState("");
+	const [streamId, setStreamId] = useState("");
+	const [isHlsStreaming, setIsHlsStreaming] = useState(false);
+	const [isStartingHls, setIsStartingHls] = useState(false);
+	const [hlsStartedByMe, setHlsStartedByMe] = useState(false);
+	const hlsUrlRef = useRef<string>("");
 
 	const localVideoRef = useRef<HTMLVideoElement>(null);
 	const _remoteVideoRefs = useRef<{
@@ -317,6 +324,37 @@ export default function RoomPage() {
 				socket.on("roomParticipantCount", ({ count }) => {
 					setParticipantCount(count);
 				});
+
+				// HLS streaming event listeners
+				socket.on("hlsStreamReady", (data: { streamId: string }) => {
+					console.log("HLS stream ready:", data);
+					setIsHlsStreaming(true);
+					setIsStartingHls(false);
+					
+					// Auto-copy the watch page URL to clipboard using the stream ID
+					const currentHlsUrl = hlsUrlRef.current;
+					if (currentHlsUrl) {
+						// Extract streamId from HLS URL (e.g., /hls/room_xxx_timestamp/stream.m3u8)
+						const streamIdMatch = currentHlsUrl.match(/\/hls\/([^\/]+)\/stream\.m3u8/);
+						if (streamIdMatch) {
+							const streamId = streamIdMatch[1];
+							const watchUrl = `${window.location.origin}/watch/${streamId}`;
+							navigator.clipboard.writeText(watchUrl);
+							toast.success("HLS stream is ready! Watch link copied to clipboard.");
+						} else {
+							toast.success("HLS stream is ready!");
+						}
+					} else {
+						toast.success("HLS stream is ready!");
+					}
+				});
+
+				socket.on("hlsStreamFailed", (data: { streamId: string; error: string }) => {
+					console.error("HLS stream failed:", data);
+					setIsStartingHls(false);
+					setIsHlsStreaming(false);
+					toast.error(`HLS stream failed: ${data.error}`);
+				});
 			} catch (error) {
 				console.error("Failed to connect:", error);
 				setStatus("Failed to connect to meeting");
@@ -453,6 +491,62 @@ export default function RoomPage() {
 		}
 	};
 
+	const startHlsStream = async () => {
+		const socket = socketRef.current;
+		if (!socket || !isConnected) {
+			toast.error("Not connected to meeting");
+			return;
+		}
+
+		if (!isProducing) {
+			toast.error("Please join the call first before starting HLS stream");
+			return;
+		}
+
+		setIsStartingHls(true);
+		toast.info("Starting HLS stream...");
+
+		socket.emit(
+			"startHLS",
+			{ socketId: socket.id, roomId: meetingId },
+			(response: { error?: string; hlsUrl?: string; streamId?: string }) => {
+				if (response.error) {
+					toast.error(`Error starting HLS: ${response.error}`);
+					setIsStartingHls(false);
+				} else {
+					console.log("HLS streaming started:", response);
+					toast.info("HLS stream created, waiting for segments...");
+					
+					// Store the stream details
+					const url = response?.hlsUrl || "";
+					setHlsUrl(url);
+					setStreamId(response?.streamId || "");
+					setHlsStartedByMe(true);
+					hlsUrlRef.current = url;
+				}
+			},
+		);
+	};
+
+	const stopHlsStream = () => {
+		const socket = socketRef.current;
+		if (!socket || !streamId) return;
+
+		socket.emit("stopHLS", { streamId }, (response: { error?: string; success?: boolean }) => {
+			if (response.error) {
+				toast.error(`Error stopping HLS: ${response.error}`);
+			} else {
+				setHlsUrl("");
+				setStreamId("");
+				setIsHlsStreaming(false);
+				setIsStartingHls(false);
+				setHlsStartedByMe(false);
+				hlsUrlRef.current = "";
+				toast.success("HLS streaming stopped");
+			}
+		});
+	};
+
 	// Auto-hide controls after 3 seconds of inactivity
 	useEffect(() => {
 		let timeout: NodeJS.Timeout;
@@ -533,6 +627,22 @@ export default function RoomPage() {
 						</div>
 					</div>
 					<div className="flex items-center gap-2">
+						{/* Stop HLS button - only show for stream starter */}
+						{isHlsStreaming && hlsStartedByMe && (
+							<Tooltip>
+								<TooltipTrigger asChild>
+									<Button 
+										variant="destructive" 
+										size="sm" 
+										onClick={stopHlsStream}
+										className="bg-red-600 hover:bg-red-700 text-white"
+									>
+										Stop HLS
+									</Button>
+								</TooltipTrigger>
+								<TooltipContent>Stop HLS streaming</TooltipContent>
+							</Tooltip>
+						)}
 						<Tooltip>
 							<TooltipTrigger asChild>
 								<Button 
@@ -560,18 +670,6 @@ export default function RoomPage() {
 								</Button>
 							</TooltipTrigger>
 							<TooltipContent>Copy meeting link</TooltipContent>
-						</Tooltip>
-						<Tooltip>
-							<TooltipTrigger asChild>
-								<Button 
-									variant="ghost" 
-									size="sm"
-									className="text-white hover:bg-white/20"
-								>
-									<Settings className="h-4 w-4" />
-								</Button>
-							</TooltipTrigger>
-							<TooltipContent>Settings</TooltipContent>
 						</Tooltip>
 					</div>
 				</div>
@@ -675,7 +773,7 @@ export default function RoomPage() {
 						(emptySlot) => (
 							<div
 								key={`empty-slot-${participantCount}-${emptySlot}`}
-								className="bg-gray-800/30 rounded-lg flex items-center justify-center"
+								className="bg-gray-800/30 rounded-lg flex items-center justify-end"
 							>
 								<div className="text-center text-gray-400">
 									<Users className="h-8 w-8 mx-auto mb-2 opacity-50" />
@@ -750,32 +848,37 @@ export default function RoomPage() {
 						</Tooltip>
 					)}
 
-					{/* Screen Share */}
+					{/* HLS Share */}
 					<Tooltip>
 						<TooltipTrigger asChild>
 							<Button
+								onClick={isHlsStreaming ? stopHlsStream : startHlsStream}
+								disabled={isStartingHls}
 								size="lg"
-								variant="secondary"
-								className="h-12 w-12 rounded-full bg-gray-700 hover:bg-gray-600"
+								variant={isHlsStreaming ? "destructive" : "secondary"}
+								className={`h-12 w-12 rounded-full ${
+									isHlsStreaming 
+										? 'bg-red-600 hover:bg-red-700' 
+										: isStartingHls 
+										? 'bg-blue-600 hover:bg-blue-700'
+										: 'bg-gray-700 hover:bg-gray-600'
+								}`}
 							>
-								<ScreenShare className="h-5 w-5" />
+								{isStartingHls ? (
+									<Loader2 className="h-5 w-5 animate-spin" />
+								) : (
+									<Share className="h-5 w-5" />
+								)}
 							</Button>
 						</TooltipTrigger>
-						<TooltipContent>Share screen</TooltipContent>
-					</Tooltip>
-
-					{/* More Options */}
-					<Tooltip>
-						<TooltipTrigger asChild>
-							<Button
-								size="lg"
-								variant="secondary"
-								className="h-12 w-12 rounded-full bg-gray-700 hover:bg-gray-600"
-							>
-								<MoreVertical className="h-5 w-5" />
-							</Button>
-						</TooltipTrigger>
-						<TooltipContent>More options</TooltipContent>
+						<TooltipContent>
+							{isStartingHls 
+								? "Starting HLS stream..." 
+								: isHlsStreaming 
+								? "Stop HLS stream" 
+								: "Start HLS stream"
+							}
+						</TooltipContent>
 					</Tooltip>
 				</div>
 				
