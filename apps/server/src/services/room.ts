@@ -1,6 +1,7 @@
 import type { RoomState } from "@/types/index.js";
 import { mediaCodecs } from "../config/mediasoup.js";
 import { getWorker } from "./mediasoup.js";
+import { getHLSProcesses, stopHLSStream } from "./hls.js";
 
 const rooms = new Map<string, RoomState>();
 
@@ -71,6 +72,13 @@ export function leaveRoom(roomId: string, socketId: string): void {
 	console.log(`Socket ${socketId} left room ${roomId}`);
 
 	if (roomState.participants.size === 0) {
+		for (const [streamId] of getHLSProcesses()) {
+			if (streamId.includes(`room_${roomId}_`)) {
+				console.log(`Stopping HLS stream ${streamId} for empty room ${roomId}`);
+				stopHLSStream(streamId);
+			}
+		}
+		
 		roomState.router.close();
 		rooms.delete(roomId);
 		console.log(`Room ${roomId} deleted (empty)`);
