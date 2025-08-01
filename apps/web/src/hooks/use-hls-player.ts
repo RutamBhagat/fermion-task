@@ -92,7 +92,6 @@ export function useHLSPlayer(streamId: string) {
 											try {
 												hlsRef.current.startLoad();
 											} catch (e) {
-												// Silent retry
 												console.log("Retrying HLS stream load...", e);
 											}
 										}

@@ -363,7 +363,6 @@ export function stopHLSStream(streamId: string) {
 	streamSocketMap.delete(streamId);
 	console.log(`HLS stream stopped for ${streamId}`);
 	
-	// Clean up old streams, keeping only the current one
 	cleanupOldStreams(streamId);
 }
 
