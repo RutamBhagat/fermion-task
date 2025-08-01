@@ -1,8 +1,8 @@
 "use client";
 
-import { hlsConfig } from "@/lib/config/hls-config";
 import { type SyntheticEvent, useRef, useState } from "react";
 import ReactPlayer from "react-player";
+import { hlsConfig } from "@/lib/config/hls-config";
 
 interface HlsDvrPlayerProps {
   streamId: string;
@@ -76,7 +76,7 @@ export function HlsDvrPlayer({ streamId }: HlsDvrPlayerProps) {
           if (player?.startLoad) {
             player.startLoad();
             console.log(
-              "🎬 HLS Player ready - manual startLoad() called for DVR"
+              "🎬 HLS Player ready - manual startLoad() called for DVR",
             );
           }
           handleReady();
