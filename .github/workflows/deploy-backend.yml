@@ -34,7 +34,7 @@ jobs:
           mkdir -p deploy
           cp -r apps/server/dist deploy/
           cp apps/server/package.json deploy/
-          cp apps/server/ecosystem.config.js deploy/
+          cp apps/server/ecosystem.config.cjs deploy/
           tar -czf deploy.tar.gz -C deploy .
 
       - name: Prepare Directory on EC2
@@ -74,6 +74,6 @@ jobs:
             
             npm install --omit=dev
             
-            pm2 startOrRestart ecosystem.config.js
+            pm2 startOrRestart ecosystem.config.cjs
             
             pm2 save
