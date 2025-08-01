@@ -1,7 +1,12 @@
 "use client";
 
-import Hls from "hls.js";
+import Hls, { type ErrorData } from "hls.js";
 import { useCallback, useEffect, useRef, useState } from "react";
+
+// Extend HLS type to include our custom cleanup property
+interface ExtendedHls extends Hls {
+	__dvrCleanup?: () => void;
+}
 
 export function useHLSPlayer(streamId: string) {
 	const [isHlsLoaded, setIsHlsLoaded] = useState(false);
@@ -86,7 +91,7 @@ export function useHLSPlayer(streamId: string) {
 			liveSyncOnStallIncrease: 1, // Increase target latency on stalls
 			maxLiveSyncPlaybackRate: 1, // Disable speed-up to catch up to live
 
-			// DVR-specific settings  
+			// DVR-specific settings
 			liveDurationInfinity: false, // ✅ Keep finite duration for time display
 			backBufferLength: 120, // Keep 2 minutes of back buffer for seeking
 
@@ -104,7 +109,7 @@ export function useHLSPlayer(streamId: string) {
 		});
 	}, []);
 
-	const handleError = useCallback(async (_event: unknown, data: any) => {
+	const handleError = useCallback(async (_event: unknown, data: ErrorData) => {
 		console.warn(
 			"HLS Error:",
 			data.details,
@@ -177,8 +182,9 @@ export function useHLSPlayer(streamId: string) {
 				// Clean up existing instance
 				if (hlsRef.current) {
 					// Clean up DVR event listeners if they exist
-					if ((hlsRef.current as any).__dvrCleanup) {
-						(hlsRef.current as any).__dvrCleanup();
+					const extendedHls = hlsRef.current as ExtendedHls;
+					if (extendedHls.__dvrCleanup) {
+						extendedHls.__dvrCleanup();
 					}
 					hlsRef.current.destroy();
 					hlsRef.current = null;
@@ -209,15 +215,15 @@ export function useHLSPlayer(streamId: string) {
 						if (continuousLoadingRef.current) {
 							clearInterval(continuousLoadingRef.current);
 						}
-						
+
 						continuousLoadingRef.current = setInterval(() => {
 							if (hlsRef.current && !isUserSeekingRef.current) {
 								try {
 									// Force HLS.js to check for new segments
 									hlsRef.current.startLoad(-1);
-									console.log('DVR: Forced segment loading check');
+									console.log("DVR: Forced segment loading check");
 								} catch (error) {
-									console.warn('DVR: Error during continuous loading:', error);
+									console.warn("DVR: Error during continuous loading:", error);
 								}
 							}
 						}, 3000); // Check every 3 seconds for new segments
@@ -235,8 +241,10 @@ export function useHLSPlayer(streamId: string) {
 					const handleVideoSeeked = () => {
 						isUserSeekingRef.current = false;
 						lastSeekPositionRef.current = videoElement.currentTime;
-						console.log(`DVR: User finished seeking at: ${videoElement.currentTime}s`);
-						
+						console.log(
+							`DVR: User finished seeking at: ${videoElement.currentTime}s`,
+						);
+
 						// Start continuous loading after seeking to ensure we keep getting new segments
 						setTimeout(() => {
 							startContinuousLoading();
@@ -270,27 +278,31 @@ export function useHLSPlayer(streamId: string) {
 					// DVR: Prevent auto-rewind when reaching end of buffered content
 					const handleEnded = (event: Event) => {
 						event.preventDefault();
-						console.warn('DVR: Video ended event prevented - staying at current position');
-						
+						console.warn(
+							"DVR: Video ended event prevented - staying at current position",
+						);
+
 						// Don't let the video rewind, just pause at current position
 						videoElement.pause();
-						
+
 						// Force loading of more content
 						if (hlsRef.current) {
-							console.log('DVR: Forcing load of new segments...');
+							console.log("DVR: Forcing load of new segments...");
 							hlsRef.current.startLoad(-1);
-							
+
 							// Also restart continuous loading
 							startContinuousLoading();
-							
+
 							// Try to resume playback after a short delay
 							setTimeout(() => {
 								if (!videoElement.paused) return; // User manually played
 								try {
 									videoElement.play();
-									console.log('DVR: Resumed playback after loading new content');
+									console.log(
+										"DVR: Resumed playback after loading new content",
+									);
 								} catch (error) {
-									console.warn('DVR: Could not resume playback:', error);
+									console.warn("DVR: Could not resume playback:", error);
 								}
 							}, 2000);
 						}
@@ -308,7 +320,7 @@ export function useHLSPlayer(streamId: string) {
 						videoElement.removeEventListener("seeked", handleVideoSeeked);
 						videoElement.removeEventListener("timeupdate", handleTimeUpdate);
 						videoElement.removeEventListener("ended", handleEnded);
-						
+
 						// Clear continuous loading timer
 						if (continuousLoadingRef.current) {
 							clearInterval(continuousLoadingRef.current);
@@ -317,7 +329,7 @@ export function useHLSPlayer(streamId: string) {
 					};
 
 					// Store cleanup in HLS instance for later use
-					(hls as any).__dvrCleanup = cleanup;
+					(hls as ExtendedHls).__dvrCleanup = cleanup;
 
 					// Load the stream
 					hls.loadSource(hlsUrl);
@@ -369,11 +381,12 @@ export function useHLSPlayer(streamId: string) {
 				clearInterval(continuousLoadingRef.current);
 				continuousLoadingRef.current = null;
 			}
-			
+
 			if (hlsRef.current) {
 				// Clean up DVR event listeners if they exist
-				if ((hlsRef.current as any).__dvrCleanup) {
-					(hlsRef.current as any).__dvrCleanup();
+				const extendedHls = hlsRef.current as ExtendedHls;
+				if (extendedHls.__dvrCleanup) {
+					extendedHls.__dvrCleanup();
 				}
 				hlsRef.current.destroy();
 				hlsRef.current = null;

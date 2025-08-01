@@ -329,9 +329,9 @@ function buildFFmpegArgs(
 		"-hls_time",
 		"2",
 		"-hls_list_size",
-		"0",
+		"0", // DVR: Keep all segments for full seekability
 		"-hls_flags",
-		"independent_segments",
+		"independent_segments+program_date_time", // DVR: Add timestamps for better seeking
 		"-hls_segment_type",
 		"mpegts",
 		"-hls_allow_cache",
@@ -340,6 +340,8 @@ function buildFFmpegArgs(
 		"1",
 		"-start_number",
 		"0",
+		"-hls_playlist_type",
+		"event", // DVR: Use event playlist type for growing playlists
 		`${streamDir}/stream.m3u8`,
 	);
 
