@@ -86,27 +86,25 @@ export function HlsDvrPlayer({ streamId }: HlsDvrPlayerProps) {
       <ReactPlayer
         ref={playerRef}
         src={hlsUrl}
-        playing={true} // Auto-start playback
-        controls={true} // Show native controls
+        playing={true}
+        controls={true}
         width="100%"
         height="100%"
-        muted={true} // Required for autoplay in modern browsers
-        playsInline={true} // For mobile devices
+        muted={true}
+        playsInline={true}
         style={{
           visibility: isBuffering ? "hidden" : "visible",
         }}
         config={{
           hls: hlsConfig,
         }}
-        // Event handlers for state management
         onReady={() => {
-          // Since autoStartLoad: false, we need to manually start loading for DVR
           // biome-ignore lint/suspicious/noExplicitAny: ReactPlayer type is complex
           const player = (playerRef.current as any)?.getInternalPlayer?.();
           if (player?.startLoad) {
             player.startLoad();
             console.log(
-              "🎬 HLS Player ready - manual startLoad() called for DVR",
+              "🎬 HLS Player ready - manual startLoad() called for DVR"
             );
           }
           handleReady();
@@ -123,7 +121,6 @@ export function HlsDvrPlayer({ streamId }: HlsDvrPlayerProps) {
         }
       />
 
-      {/* Loading overlay */}
       {isBuffering && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/70 text-white">
           <div className="mb-4 h-12 w-12 animate-spin rounded-full border-white border-b-2" />
