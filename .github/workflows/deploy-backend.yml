@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'apps/server/**'
+      - '.github/workflows/**'
   workflow_dispatch:
 
 jobs:
