@@ -14,193 +14,193 @@ import { useVideoGrid } from "@/hooks/use-video-grid";
 import { useWebRTC } from "@/hooks/use-webrtc";
 
 export default function RoomPage() {
-	const router = useRouter();
-	const params = useParams();
-	const meetingId = params.meetingId as string;
+  const router = useRouter();
+  const params = useParams();
+  const meetingId = params.meetingId as string;
 
-	const [status, setStatus] = useState("Connecting to meeting...");
-	const [hlsPreviewMode] = useState(false);
+  const [status, setStatus] = useState("Connecting to meeting...");
+  const [hlsPreviewMode] = useState(false);
 
-	const { socket, isConnected } = useSocket({
-		url: process.env.NEXT_PUBLIC_SERVER_URL,
-		roomId: meetingId,
-	});
+  const { socket, isConnected } = useSocket({
+    url: process.env.NEXT_PUBLIC_SERVER_URL,
+    roomId: meetingId,
+  });
 
-	const {
-		localStream,
-		isMuted,
-		isVideoOff,
-		hasPermissions,
-		getMedia,
-		toggleMute,
-		toggleVideo,
-	} = useMediaDevices();
+  const {
+    localStream,
+    isMuted,
+    isVideoOff,
+    hasPermissions,
+    getMedia,
+    toggleMute,
+    toggleVideo,
+  } = useMediaDevices();
 
-	const {
-		isProducing,
-		remoteParticipants,
-		participantCount,
-		setParticipantCount,
-		initializeDevice,
-		createConsumerTransport,
-		createConsumer,
-		startProducing,
-		handleNewProducer,
-		handleProducerClosed,
-		cleanup,
-	} = useWebRTC(meetingId);
+  const {
+    isProducing,
+    remoteParticipants,
+    participantCount,
+    setParticipantCount,
+    initializeDevice,
+    createConsumerTransport,
+    createConsumer,
+    startProducing,
+    handleNewProducer,
+    handleProducerClosed,
+    cleanup,
+  } = useWebRTC(meetingId);
 
-	const {
-		isHlsStreaming,
-		isStartingHls,
-		startHlsStream,
-		stopHlsStream,
-		handleHlsStreamReady,
-		handleHlsStreamFailed,
-	} = useHLSStream(meetingId);
+  const {
+    isHlsStreaming,
+    isStartingHls,
+    startHlsStream,
+    stopHlsStream,
+    handleHlsStreamReady,
+    handleHlsStreamFailed,
+  } = useHLSStream(meetingId);
 
-	const { gridClass, hlsLayout, showEmptySlots, emptySlotCount } = useVideoGrid(
-		participantCount,
-		hlsPreviewMode,
-	);
+  const { gridClass, hlsLayout, showEmptySlots, emptySlotCount } = useVideoGrid(
+    participantCount,
+    hlsPreviewMode,
+  );
 
-	const { showControls } = useControlsVisibility();
+  const { showControls } = useControlsVisibility();
 
-	useEffect(() => {
-		if (!socket || !isConnected) return;
+  useEffect(() => {
+    if (!socket || !isConnected) return;
 
-		const initialize = async () => {
-			try {
-				setStatus(`Connected to meeting: ${meetingId}`);
+    const initialize = async () => {
+      try {
+        setStatus(`Connected to meeting: ${meetingId}`);
 
-				await initializeDevice(socket);
-				const stream = await getMedia();
+        await initializeDevice(socket);
+        const stream = await getMedia();
 
-				if (stream) {
-					setStatus(`Ready to stream in meeting: ${meetingId}`);
-					await createConsumerTransport(socket);
+        if (stream) {
+          setStatus(`Ready to stream in meeting: ${meetingId}`);
+          await createConsumerTransport(socket);
 
-					const existingProducers = await new Promise<
-						Array<{ producerId: string; socketId: string }>
-					>((resolve) => {
-						socket.emit("getProducers", { roomId: meetingId }, resolve);
-					});
+          const existingProducers = await new Promise<
+            Array<{ producerId: string; socketId: string }>
+          >((resolve) => {
+            socket.emit("getProducers", { roomId: meetingId }, resolve);
+          });
 
-					for (const { socketId } of existingProducers) {
-						await createConsumer(socket, socketId);
-					}
-				}
-			} catch (error) {
-				console.error("Failed to initialize:", error);
-				setStatus("Error: Setup failed");
-			}
-		};
+          for (const { socketId } of existingProducers) {
+            await createConsumer(socket, socketId);
+          }
+        }
+      } catch (error) {
+        console.error("Failed to initialize:", error);
+        setStatus("Error: Setup failed");
+      }
+    };
 
-		initialize();
+    initialize();
 
-		socket.on("disconnect", () => {
-			setStatus("Disconnected from meeting");
-		});
+    socket.on("disconnect", () => {
+      setStatus("Disconnected from meeting");
+    });
 
-		socket.on("newProducer", (data) => handleNewProducer(socket, data));
-		socket.on("producerClosed", handleProducerClosed);
-		socket.on("roomParticipantCount", ({ count }) =>
-			setParticipantCount(count),
-		);
-		socket.on("hlsStreamReady", handleHlsStreamReady);
-		socket.on("hlsStreamFailed", handleHlsStreamFailed);
+    socket.on("newProducer", (data) => handleNewProducer(socket, data));
+    socket.on("producerClosed", handleProducerClosed);
+    socket.on("roomParticipantCount", ({ count }) =>
+      setParticipantCount(count),
+    );
+    socket.on("hlsStreamReady", handleHlsStreamReady);
+    socket.on("hlsStreamFailed", handleHlsStreamFailed);
 
-		return () => {
-			socket.off("disconnect");
-			socket.off("newProducer");
-			socket.off("producerClosed");
-			socket.off("roomParticipantCount");
-			socket.off("hlsStreamReady");
-			socket.off("hlsStreamFailed");
-			cleanup();
-		};
-	}, [
-		socket,
-		isConnected,
-		meetingId,
-		initializeDevice,
-		getMedia,
-		createConsumerTransport,
-		createConsumer,
-		handleNewProducer,
-		handleProducerClosed,
-		setParticipantCount,
-		handleHlsStreamReady,
-		handleHlsStreamFailed,
-		cleanup,
-	]);
+    return () => {
+      socket.off("disconnect");
+      socket.off("newProducer");
+      socket.off("producerClosed");
+      socket.off("roomParticipantCount");
+      socket.off("hlsStreamReady");
+      socket.off("hlsStreamFailed");
+      cleanup();
+    };
+  }, [
+    socket,
+    isConnected,
+    meetingId,
+    initializeDevice,
+    getMedia,
+    createConsumerTransport,
+    createConsumer,
+    handleNewProducer,
+    handleProducerClosed,
+    setParticipantCount,
+    handleHlsStreamReady,
+    handleHlsStreamFailed,
+    cleanup,
+  ]);
 
-	const handleJoinCall = async () => {
-		if (!socket || !localStream) return;
+  const handleJoinCall = async () => {
+    if (!socket || !localStream) return;
 
-		try {
-			setStatus("Starting stream...");
-			await startProducing(socket, localStream);
-			setStatus(`Streaming in meeting: ${meetingId}`);
-		} catch (error) {
-			console.error("Failed to start producing:", error);
-			setStatus("Failed to start streaming");
-		}
-	};
+    try {
+      setStatus("Starting stream...");
+      await startProducing(socket, localStream);
+      setStatus(`Streaming in meeting: ${meetingId}`);
+    } catch (error) {
+      console.error("Failed to start producing:", error);
+      setStatus("Failed to start streaming");
+    }
+  };
 
-	const handleLeaveCall = () => {
-		router.push("/");
-	};
+  const handleLeaveCall = () => {
+    router.push("/");
+  };
 
-	const handleCopyMeetingLink = () => {
-		const meetingUrl = `${window.location.origin}/room/${meetingId}`;
-		navigator.clipboard.writeText(meetingUrl);
-		toast.success("Meeting link copied to clipboard");
-	};
+  const handleCopyMeetingLink = () => {
+    const meetingUrl = `${window.location.origin}/room/${meetingId}`;
+    navigator.clipboard.writeText(meetingUrl);
+    toast.success("Meeting link copied to clipboard");
+  };
 
-	const handleStartHls = () => {
-		if (socket) startHlsStream(socket, isProducing);
-	};
+  const handleStartHls = () => {
+    if (socket) startHlsStream(socket, isProducing);
+  };
 
-	const handleStopHls = () => {
-		if (socket) stopHlsStream(socket);
-	};
+  const handleStopHls = () => {
+    if (socket) stopHlsStream(socket);
+  };
 
-	return (
-		<div className="relative h-screen w-screen overflow-hidden bg-black">
-			<HlsPreviewBanner show={hlsPreviewMode} />
+  return (
+    <div className="relative h-screen w-screen overflow-hidden bg-black">
+      <HlsPreviewBanner show={hlsPreviewMode} />
 
-			<VideoGrid
-				localStream={localStream}
-				remoteParticipants={remoteParticipants}
-				participantCount={participantCount}
-				gridClass={gridClass}
-				hlsPreviewMode={hlsPreviewMode}
-				hlsAspectRatio={hlsLayout.aspectRatio}
-				isMuted={isMuted}
-				isVideoOff={isVideoOff}
-				showEmptySlots={showEmptySlots}
-				emptySlotCount={emptySlotCount}
-			/>
+      <VideoGrid
+        localStream={localStream}
+        remoteParticipants={remoteParticipants}
+        participantCount={participantCount}
+        gridClass={gridClass}
+        hlsPreviewMode={hlsPreviewMode}
+        hlsAspectRatio={hlsLayout.aspectRatio}
+        isMuted={isMuted}
+        isVideoOff={isVideoOff}
+        showEmptySlots={showEmptySlots}
+        emptySlotCount={emptySlotCount}
+      />
 
-			<ControlBar
-				isConnected={isConnected}
-				isProducing={isProducing}
-				isMuted={isMuted}
-				isVideoOff={isVideoOff}
-				isHlsStreaming={isHlsStreaming}
-				isStartingHls={isStartingHls}
-				showControls={showControls}
-				status={status}
-				onToggleMute={toggleMute}
-				onToggleVideo={toggleVideo}
-				onJoinCall={handleJoinCall}
-				onLeaveCall={handleLeaveCall}
-				onStartHls={handleStartHls}
-				onStopHls={handleStopHls}
-				onCopyMeetingLink={handleCopyMeetingLink}
-				canJoinCall={hasPermissions}
-			/>
-		</div>
-	);
+      <ControlBar
+        isConnected={isConnected}
+        isProducing={isProducing}
+        isMuted={isMuted}
+        isVideoOff={isVideoOff}
+        isHlsStreaming={isHlsStreaming}
+        isStartingHls={isStartingHls}
+        showControls={showControls}
+        status={status}
+        onToggleMute={toggleMute}
+        onToggleVideo={toggleVideo}
+        onJoinCall={handleJoinCall}
+        onLeaveCall={handleLeaveCall}
+        onStartHls={handleStartHls}
+        onStopHls={handleStopHls}
+        onCopyMeetingLink={handleCopyMeetingLink}
+        canJoinCall={hasPermissions}
+      />
+    </div>
+  );
 }
