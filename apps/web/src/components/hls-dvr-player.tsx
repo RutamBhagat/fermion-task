@@ -19,7 +19,7 @@ export function HlsDvrPlayer({ streamId }: HlsDvrPlayerProps) {
 		// 🎯 CRITICAL DVR Settings: Required to prevent automatic jump to live edge
 		liveDurationInfinity: true, // Required so we can seek in the past
 		autoStartLoad: false, // Manual load control to prevent auto-snap to live edge
-		
+
 		// 📺 Buffer Configuration for DVR
 		backBufferLength: Number.POSITIVE_INFINITY, // Keep all played content for seeking
 		liveBackBufferLength: 0, // Disable live-specific back buffer limits
@@ -108,13 +108,16 @@ export function HlsDvrPlayer({ streamId }: HlsDvrPlayerProps) {
 				config={{
 					hls: hlsConfig,
 				}}
-				// Event handlers for state management  
+				// Event handlers for state management
 				onReady={() => {
 					// Since autoStartLoad: false, we need to manually start loading for DVR
+					// biome-ignore lint/suspicious/noExplicitAny: ReactPlayer type is complex
 					const player = (playerRef.current as any)?.getInternalPlayer?.();
-					if (player && player.startLoad) {
+					if (player?.startLoad) {
 						player.startLoad();
-						console.log("🎬 HLS Player ready - manual startLoad() called for DVR");
+						console.log(
+							"🎬 HLS Player ready - manual startLoad() called for DVR",
+						);
 					}
 					handleReady();
 				}}
