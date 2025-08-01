@@ -31,8 +31,8 @@ export const workerSettings: mediasoup.types.WorkerSettings = {
 export const webRtcTransportOptions: mediasoup.types.WebRtcTransportOptions = {
   listenIps: [
     {
-      ip: "127.0.0.1",
-      announcedIp: undefined,
+      ip: process.env.WEBRTC_LISTEN_IP || "127.0.0.1",
+      announcedIp: process.env.ANNOUNCED_IP || undefined,
     },
   ],
   enableUdp: true,
@@ -41,7 +41,10 @@ export const webRtcTransportOptions: mediasoup.types.WebRtcTransportOptions = {
 };
 
 export const plainTransportOptions: mediasoup.types.PlainTransportOptions = {
-  listenIp: { ip: "127.0.0.1" },
+  listenIp: { 
+    ip: process.env.WEBRTC_LISTEN_IP || "127.0.0.1",
+    announcedIp: process.env.ANNOUNCED_IP || undefined,
+  },
   rtcpMux: false,
   comedia: false,
 };
