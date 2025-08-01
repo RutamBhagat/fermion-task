@@ -327,17 +327,17 @@ function buildFFmpegArgs(
 		"-f",
 		"hls",
 		"-hls_time",
-		"1",
+		"2",
 		"-hls_list_size",
-		"12",
+		"0",
 		"-hls_flags",
-		"delete_segments+omit_endlist+independent_segments",
+		"independent_segments",
 		"-hls_segment_type",
 		"mpegts",
 		"-hls_allow_cache",
-		"0",
+		"1",
 		"-hls_init_time",
-		"0.5",
+		"1",
 		"-start_number",
 		"0",
 		`${streamDir}/stream.m3u8`,
@@ -362,7 +362,7 @@ export function stopHLSStream(streamId: string) {
 
 	streamSocketMap.delete(streamId);
 	console.log(`HLS stream stopped for ${streamId}`);
-	
+
 	cleanupOldStreams(streamId);
 }
 
@@ -374,15 +374,20 @@ export async function cleanupOldStreams(currentStreamId: string) {
 
 		const streamDirs = await readdir(HLS_DIR, { withFileTypes: true });
 		const dirsToDelete = streamDirs
-			.filter(dirent => dirent.isDirectory() && dirent.name !== currentStreamId)
-			.map(dirent => dirent.name);
+			.filter(
+				(dirent) => dirent.isDirectory() && dirent.name !== currentStreamId,
+			)
+			.map((dirent) => dirent.name);
 
 		if (dirsToDelete.length === 0) {
-			console.log(`No old streams to clean up`);
+			console.log("No old streams to clean up");
 			return;
 		}
 
-		console.log(`Cleaning up ${dirsToDelete.length} old stream directories:`, dirsToDelete);
+		console.log(
+			`Cleaning up ${dirsToDelete.length} old stream directories:`,
+			dirsToDelete,
+		);
 
 		for (const dirName of dirsToDelete) {
 			const dirPath = `${HLS_DIR}/${dirName}`;
@@ -394,9 +399,11 @@ export async function cleanupOldStreams(currentStreamId: string) {
 			}
 		}
 
-		console.log(`Stream cleanup completed. Kept current stream: ${currentStreamId}`);
+		console.log(
+			`Stream cleanup completed. Kept current stream: ${currentStreamId}`,
+		);
 	} catch (error) {
-		console.error('Error during stream cleanup:', error);
+		console.error("Error during stream cleanup:", error);
 	}
 }
 
