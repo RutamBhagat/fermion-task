@@ -71,10 +71,8 @@ jobs:
             tar -xzf deploy.tar.gz
             rm deploy.tar.gz
             
-            pm2 stop hono-backend || echo "Process not running"
+            npm install --omit=dev
             
-            npm install --production
-            
-            pm2 start dist/index.js --name hono-backend
+            pm2 restart dist/index.js --name hono-backend
             
             pm2 save
