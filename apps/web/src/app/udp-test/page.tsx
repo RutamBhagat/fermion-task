@@ -98,6 +98,31 @@ export default function UDPTestPage() {
 		}
 	};
 
+	const testMediasoupHealth = () => {
+		if (!socket || !socket.connected) {
+			addResponse("❌ Socket.IO not connected");
+			return;
+		}
+
+		addResponse("🔍 Testing Mediasoup health...");
+		
+		socket.emit("mediasoup-health-check", {}, (response: any) => {
+			if (response.success) {
+				addResponse("✅ Mediasoup router healthy");
+				addResponse(`📊 Router ID: ${response.router.id}`);
+				addResponse(`📊 RTP Codecs: ${response.router.rtpCapabilitiesCount}`);
+				addResponse(`🚀 Transport created successfully`);
+				addResponse(`📡 ICE Candidates: ${response.transport.iceCandidates.length}`);
+				addResponse(`⚙️ WEBRTC_LISTEN_IP: ${response.config.WEBRTC_LISTEN_IP}`);
+				addResponse(`🌐 ANNOUNCED_IP: ${response.config.ANNOUNCED_IP}`);
+			} else {
+				addResponse(`❌ Mediasoup health check failed: ${response.error}`);
+				addResponse(`⚙️ WEBRTC_LISTEN_IP: ${response.config.WEBRTC_LISTEN_IP}`);
+				addResponse(`🌐 ANNOUNCED_IP: ${response.config.ANNOUNCED_IP}`);
+			}
+		});
+	};
+
 	const addResponse = (response: string) => {
 		setResponses(prev => [...prev, `${new Date().toLocaleTimeString()}: ${response}`]);
 	};
@@ -137,12 +162,15 @@ export default function UDPTestPage() {
 						</Button>
 					</div>
 
-					<div className="flex gap-2">
+					<div className="flex gap-2 flex-wrap">
 						<Button onClick={testHTTPEndpoint} variant="outline">
 							Test HTTP Endpoint
 						</Button>
 						<Button onClick={testWebRTCCapabilities} variant="outline">
 							Test WebRTC
+						</Button>
+						<Button onClick={testMediasoupHealth} variant="outline" disabled={!isConnected}>
+							Test Mediasoup
 						</Button>
 						<Button onClick={clearResponses} variant="outline">
 							Clear
@@ -178,6 +206,7 @@ export default function UDPTestPage() {
 								<li>Use "Test HTTP Endpoint" to verify server is responding</li>
 								<li>Use "Test WebRTC" to check browser WebRTC capabilities</li>
 								<li>Use "Test UDP Echo" to send messages via Socket.IO for UDP testing</li>
+								<li><strong>Use "Test Mediasoup" to check Mediasoup configuration and health</strong></li>
 								<li>Watch the server logs with: <code className="bg-gray-800 text-green-400 px-2 py-1 rounded">docker-compose logs -f fermion-server</code></li>
 							</ol>
 						</CardContent>

@@ -592,6 +592,66 @@ export function setupSocketHandlers(io: Server) {
       }
     });
 
+    // Mediasoup Health Check
+    socket.on("mediasoup-health-check", async (data, callback) => {
+      try {
+        console.log(`Mediasoup health check from ${socket.id}`);
+        
+        // Test router capabilities
+        const router = getLegacyRouter();
+        const rtpCapabilities = router.rtpCapabilities;
+        
+        // Test transport creation
+        const testTransport = await router.createWebRtcTransport({
+          listenIps: [
+            {
+              ip: process.env.WEBRTC_LISTEN_IP || '0.0.0.0',
+              announcedIp: process.env.ANNOUNCED_IP || undefined,
+            }
+          ],
+          enableUdp: true,
+          enableTcp: true,
+          preferUdp: true,
+        });
+
+        const healthData = {
+          success: true,
+          router: {
+            id: router.id,
+            closed: router.closed,
+            rtpCapabilitiesCount: rtpCapabilities.codecs?.length || 0,
+          },
+          transport: {
+            id: testTransport.id,
+            dtlsState: testTransport.dtlsState,
+            iceState: testTransport.iceState,
+            iceParameters: testTransport.iceParameters,
+            iceCandidates: testTransport.iceCandidates,
+            dtlsParameters: testTransport.dtlsParameters,
+          },
+          config: {
+            WEBRTC_LISTEN_IP: process.env.WEBRTC_LISTEN_IP || 'undefined',
+            ANNOUNCED_IP: process.env.ANNOUNCED_IP || 'undefined',
+          }
+        };
+
+        // Clean up test transport
+        testTransport.close();
+
+        callback(healthData);
+      } catch (error) {
+        console.error('Mediasoup health check failed:', error);
+        callback({
+          success: false,
+          error: error instanceof Error ? error.message : "Unknown error",
+          config: {
+            WEBRTC_LISTEN_IP: process.env.WEBRTC_LISTEN_IP || 'undefined',
+            ANNOUNCED_IP: process.env.ANNOUNCED_IP || 'undefined',
+          }
+        });
+      }
+    });
+
     socket.on("disconnect", () => {
       console.log(`Client disconnected: ${socket.id}`);
 
