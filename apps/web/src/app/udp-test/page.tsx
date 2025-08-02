@@ -278,10 +278,9 @@ export default function UDPTestPage() {
           });
 
           addResponse("✅ ICE gathering complete");
-          const candidateCount = pc.localDescription?.sdp?.split("a=candidate:")?.length ?? 1;
-          addResponse(
-            `📊 Browser gathered ${candidateCount - 1} candidates`,
-          );
+          const candidateCount =
+            pc.localDescription?.sdp?.split("a=candidate:")?.length ?? 1;
+          addResponse(`📊 Browser gathered ${candidateCount - 1} candidates`);
 
           // Check if any browser candidates match server candidates
           const browserCandidates =
