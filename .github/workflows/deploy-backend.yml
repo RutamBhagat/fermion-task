@@ -76,8 +76,8 @@ jobs:
             EOF
             
             echo "Starting application with Docker Compose..."
-            docker-compose down
-            docker-compose up --build -d
+            sudo docker compose down
+            sudo docker compose up --build -d
             
             echo "Cleaning up old Docker images..."
-            docker image prune -a -f
+            sudo docker image prune -a -f
