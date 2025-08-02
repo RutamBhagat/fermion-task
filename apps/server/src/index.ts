@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { createServer } from "node:http";
+import { createSocket } from "node:dgram";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
@@ -20,6 +21,14 @@ app.use(
 
 app.get("/", (c) => {
   return c.text("Mediasoup SFU Server OK");
+});
+
+app.get("/udp-test", (c) => {
+  return c.json({
+    message: "UDP Echo Server running on port 9999",
+    usage: "Send UDP packets to localhost:9999 and they will be echoed back",
+    test: "echo 'hello' | nc -u -w1 localhost 9999"
+  });
 });
 
 app.get("/hls/*", async (c) => {
@@ -89,11 +98,36 @@ const io = new Server(server, {
 setupSocketHandlers(io);
 
 const PORT = process.env.PORT || 3000;
+const UDP_TEST_PORT = 9999;
+
+const udpServer = createSocket('udp4');
+
+udpServer.on('message', (msg, rinfo) => {
+  console.log(`UDP Echo: Received "${msg}" from ${rinfo.address}:${rinfo.port}`);
+  udpServer.send(msg, rinfo.port, rinfo.address, (err) => {
+    if (err) {
+      console.error('UDP Echo: Failed to send response:', err);
+    } else {
+      console.log(`UDP Echo: Sent "${msg}" back to ${rinfo.address}:${rinfo.port}`);
+    }
+  });
+});
+
+udpServer.on('listening', () => {
+  const address = udpServer.address();
+  console.log(`UDP Echo Server listening on ${address?.address}:${address?.port}`);
+});
+
+udpServer.on('error', (err) => {
+  console.error('UDP Echo Server error:', err);
+});
 
 initMediasoup()
   .then(() => {
     server.listen(PORT, () => {
       console.log(`Mediasoup SFU Server running on port ${PORT}`);
     });
+    
+    udpServer.bind(UDP_TEST_PORT);
   })
   .catch(console.error);

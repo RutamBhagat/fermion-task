@@ -1,0 +1,14 @@
+services:
+  fermion-server:
+    build: .
+    container_name: fermion-server
+    ports:
+      - "3000:3000"
+      - "9999:9999/udp"
+      - "10000-10100:10000-10100/udp"
+    environment:
+      - CORS_ORIGIN=*
+      - NODE_ENV=production
+      - WEBRTC_LISTEN_IP=0.0.0.0
+      - ANNOUNCED_IP=103.183.29.23
+    restart: unless-stopped
