@@ -15,7 +15,7 @@ export function useSocket({ url, roomId }: UseSocketOptions) {
   const connect = useCallback(() => {
     if (socketRef.current?.connected) return socketRef.current;
 
-    const socket = io(url || "http://localhost:3000");
+    const socket = io(url || `${process.env.NEXT_PUBLIC_SERVER_URL}`);
     socketRef.current = socket;
 
     socket.emit("joinRoom", { roomId });

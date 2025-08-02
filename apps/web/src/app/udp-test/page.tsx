@@ -59,7 +59,7 @@ export default function UDPTestPage() {
 
   const connectSocket = () => {
     try {
-      const newSocket = io("http://localhost:3000", {
+      const newSocket = io(process.env.NEXT_PUBLIC_SERVER_URL, {
         transports: ["websocket"],
       });
 
@@ -109,7 +109,7 @@ export default function UDPTestPage() {
 
   const testHTTPEndpoint = async () => {
     try {
-      const response = await fetch("http://localhost:3000/udp-test");
+      const response = await fetch(`${process.env.NEXT_PUBLIC_SERVER_URL}/udp-test`);
       const data = await response.json();
       addResponse(`📡 HTTP Response: ${JSON.stringify(data, null, 2)}`);
     } catch (error) {
