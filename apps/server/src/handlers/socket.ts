@@ -1,7 +1,7 @@
+import { createSocket } from "node:dgram";
 import type * as mediasoup from "mediasoup";
 import type { Server, Socket } from "socket.io";
 import type { SocketTransports } from "@/types/index.js";
-import { createSocket } from "node:dgram";
 import { webRtcTransportOptions } from "../config/mediasoup.js";
 import {
   createCompositeHLSStream,
@@ -555,59 +555,60 @@ export function setupSocketHandlers(io: Server) {
       try {
         const { message, timestamp } = data;
         console.log(`UDP Test via WebSocket: "${message}" from ${socket.id}`);
-        
+
         // Create a temporary UDP client to test UDP connectivity
-        const udpClient = createSocket('udp4');
+        const udpClient = createSocket("udp4");
         const testMessage = `WebSocket->UDP: ${message}`;
-        
-        udpClient.send(testMessage, 9999, 'localhost', (err) => {
+
+        udpClient.send(testMessage, 9999, "localhost", (err) => {
           if (err) {
-            console.error('UDP Test: Failed to send via UDP:', err);
+            console.error("UDP Test: Failed to send via UDP:", err);
             socket.emit("udp-test-response", {
               success: false,
               error: err.message,
               originalMessage: message,
-              timestamp
+              timestamp,
             });
           } else {
-            console.log(`UDP Test: Successfully sent "${testMessage}" to UDP echo server`);
+            console.log(
+              `UDP Test: Successfully sent "${testMessage}" to UDP echo server`,
+            );
             socket.emit("udp-test-response", {
               success: true,
               message: `UDP test successful - sent "${testMessage}"`,
               originalMessage: message,
-              timestamp
+              timestamp,
             });
           }
           udpClient.close();
         });
-        
       } catch (error) {
-        console.error('UDP Test error:', error);
+        console.error("UDP Test error:", error);
         socket.emit("udp-test-response", {
           success: false,
           error: error instanceof Error ? error.message : "Unknown error",
           originalMessage: data.message,
-          timestamp: data.timestamp
+          timestamp: data.timestamp,
         });
       }
     });
 
     // Mediasoup Health Check
-    socket.on("mediasoup-health-check", async (data, callback) => {
+    socket.on("mediasoup-health-check", async (_data, callback) => {
       try {
         console.log(`Mediasoup health check from ${socket.id}`);
-        
+
         // Test router capabilities
         const router = getLegacyRouter();
         const rtpCapabilities = router.rtpCapabilities;
-        
+
         // Test transport creation
         const testTransport = await router.createWebRtcTransport({
           listenIps: [
             {
-              ip: process.env.WEBRTC_LISTEN_IP || '0.0.0.0',
+              ip: process.env.WEBRTC_LISTEN_IP || "0.0.0.0",
               announcedIp: process.env.ANNOUNCED_IP || undefined,
-            }
+            },
           ],
           enableUdp: true,
           enableTcp: true,
@@ -630,9 +631,9 @@ export function setupSocketHandlers(io: Server) {
             dtlsParameters: testTransport.dtlsParameters,
           },
           config: {
-            WEBRTC_LISTEN_IP: process.env.WEBRTC_LISTEN_IP || 'undefined',
-            ANNOUNCED_IP: process.env.ANNOUNCED_IP || 'undefined',
-          }
+            WEBRTC_LISTEN_IP: process.env.WEBRTC_LISTEN_IP || "undefined",
+            ANNOUNCED_IP: process.env.ANNOUNCED_IP || "undefined",
+          },
         };
 
         // Clean up test transport
@@ -640,32 +641,32 @@ export function setupSocketHandlers(io: Server) {
 
         callback(healthData);
       } catch (error) {
-        console.error('Mediasoup health check failed:', error);
+        console.error("Mediasoup health check failed:", error);
         callback({
           success: false,
           error: error instanceof Error ? error.message : "Unknown error",
           config: {
-            WEBRTC_LISTEN_IP: process.env.WEBRTC_LISTEN_IP || 'undefined',
-            ANNOUNCED_IP: process.env.ANNOUNCED_IP || 'undefined',
-          }
+            WEBRTC_LISTEN_IP: process.env.WEBRTC_LISTEN_IP || "undefined",
+            ANNOUNCED_IP: process.env.ANNOUNCED_IP || "undefined",
+          },
         });
       }
     });
 
     // Full WebRTC Connection Test
-    socket.on("webrtc-connection-test", async (data, callback) => {
+    socket.on("webrtc-connection-test", async (_data, callback) => {
       try {
         console.log(`WebRTC connection test from ${socket.id}`);
-        
+
         const router = getLegacyRouter();
-        
+
         // Create producer transport
         const producerTransport = await router.createWebRtcTransport({
           listenIps: [
             {
-              ip: process.env.WEBRTC_LISTEN_IP || '0.0.0.0',
+              ip: process.env.WEBRTC_LISTEN_IP || "0.0.0.0",
               announcedIp: process.env.ANNOUNCED_IP || undefined,
-            }
+            },
           ],
           enableUdp: true,
           enableTcp: true,
@@ -673,7 +674,7 @@ export function setupSocketHandlers(io: Server) {
         });
 
         // Monitor transport state changes
-        let connectionResult = {
+        const connectionResult = {
           success: false,
           transportId: producerTransport.id,
           initialDtlsState: producerTransport.dtlsState,
@@ -681,18 +682,22 @@ export function setupSocketHandlers(io: Server) {
           iceCandidates: producerTransport.iceCandidates,
           dtlsParameters: producerTransport.dtlsParameters,
           iceParameters: producerTransport.iceParameters,
-          finalDtlsState: 'unknown',
-          finalIceState: 'unknown',
-          error: null
+          finalDtlsState: "unknown",
+          finalIceState: "unknown",
+          error: null,
         };
 
-        producerTransport.on('dtlsstatechange', (dtlsState) => {
-          console.log(`Transport ${producerTransport.id} DTLS state: ${dtlsState}`);
+        producerTransport.on("dtlsstatechange", (dtlsState) => {
+          console.log(
+            `Transport ${producerTransport.id} DTLS state: ${dtlsState}`,
+          );
           connectionResult.finalDtlsState = dtlsState;
         });
 
-        producerTransport.on('icestatechange', (iceState) => {
-          console.log(`Transport ${producerTransport.id} ICE state: ${iceState}`);
+        producerTransport.on("icestatechange", (iceState) => {
+          console.log(
+            `Transport ${producerTransport.id} ICE state: ${iceState}`,
+          );
           connectionResult.finalIceState = iceState;
         });
 
@@ -704,7 +709,7 @@ export function setupSocketHandlers(io: Server) {
             iceParameters: producerTransport.iceParameters,
             iceCandidates: producerTransport.iceCandidates,
             dtlsParameters: producerTransport.dtlsParameters,
-          }
+          },
         });
 
         // Clean up after 10 seconds
@@ -714,9 +719,8 @@ export function setupSocketHandlers(io: Server) {
             producerTransport.close();
           }
         }, 10000);
-
       } catch (error) {
-        console.error('WebRTC connection test failed:', error);
+        console.error("WebRTC connection test failed:", error);
         callback({
           success: false,
           error: error instanceof Error ? error.message : "Unknown error",

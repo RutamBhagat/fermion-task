@@ -41,7 +41,7 @@ export const webRtcTransportOptions: mediasoup.types.WebRtcTransportOptions = {
 };
 
 export const plainTransportOptions: mediasoup.types.PlainTransportOptions = {
-  listenIp: { 
+  listenIp: {
     ip: process.env.WEBRTC_LISTEN_IP || "127.0.0.1",
     announcedIp: process.env.ANNOUNCED_IP || undefined,
   },
