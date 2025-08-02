@@ -13,18 +13,14 @@ RUN apk add --no-cache \
     openssl-dev \
     linux-headers
 
-# Install pnpm globally
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
 WORKDIR /app
 
-# Copy workspace configuration and root package.json
 COPY package.json ./
 COPY pnpm-workspace.yaml ./
 COPY apps/server/package.json ./apps/server/
 
-# Install dependencies with pnpm (includes mediasoup compilation)
-# Use --frozen-lockfile=false since we might not have pnpm-lock.yaml yet
 RUN pnpm config set network-timeout 600000 && \
     pnpm config set fetch-retry-mintimeout 60000 && \
     pnpm config set fetch-retry-maxtimeout 120000 && \
@@ -32,10 +28,8 @@ RUN pnpm config set network-timeout 600000 && \
 
 COPY apps/server/ ./apps/server/
 
-# Build the application
 RUN pnpm --filter=server build
 
-# Prune dev dependencies
 RUN pnpm --filter=server --prod install
 
 
