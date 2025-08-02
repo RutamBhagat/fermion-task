@@ -19,8 +19,11 @@ COPY package.json ./
 COPY package-lock.json ./
 COPY apps/server/package.json ./apps/server/
 
-# Install all dependencies
-RUN npm install --workspace=apps/server
+# Install all dependencies with increased timeouts for mediasoup compilation
+RUN npm config set fetch-timeout 600000 && \
+    npm config set fetch-retry-mintimeout 60000 && \
+    npm config set fetch-retry-maxtimeout 120000 && \
+    npm install --workspace=apps/server --verbose
 
 COPY apps/server/ ./apps/server/
 

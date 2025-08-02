@@ -77,7 +77,8 @@ jobs:
             
             echo "Starting application with Docker Compose..."
             sudo docker compose down
-            sudo docker compose up --build -d
+            # Set longer timeout for Docker build (mediasoup compilation takes time)
+            COMPOSE_HTTP_TIMEOUT=1200 DOCKER_CLIENT_TIMEOUT=1200 sudo -E docker compose up --build -d
             
             echo "Cleaning up old Docker images..."
             sudo docker image prune -a -f
