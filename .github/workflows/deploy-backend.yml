@@ -69,8 +69,14 @@ jobs:
             
             cd /opt/hono-backend
             
+            # Backup existing .env if it exists
+            [ -f .env ] && cp .env .env.backup
+            
             tar -xzf deploy.tar.gz
             rm deploy.tar.gz
+            
+            # Restore .env file if backup exists
+            [ -f .env.backup ] && mv .env.backup .env
             
             npm install --omit=dev
             
