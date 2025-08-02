@@ -6,9 +6,4 @@ services:
       - "3000:3000"
       - "9999:9999/udp"
       - "10000-10100:10000-10100/udp"
-    environment:
-      - CORS_ORIGIN=*
-      - NODE_ENV=production
-      - WEBRTC_LISTEN_IP=0.0.0.0
-      - ANNOUNCED_IP=192.168.1.5
     restart: unless-stopped

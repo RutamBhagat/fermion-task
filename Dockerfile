@@ -15,18 +15,19 @@ RUN apk add --no-cache \
 
 WORKDIR /app
 
-# Copy package files
-COPY apps/server/package.json ./package.json
-COPY package-lock.json ./package-lock.json
+COPY package.json ./
+COPY package-lock.json ./
+COPY apps/server/package.json ./apps/server/
 
 # Install all dependencies
-RUN npm install
+RUN npm install --workspace=apps/server
 
-# Copy server source code
-COPY apps/server/ ./
+COPY apps/server/ ./apps/server/
 
 # Build the application
-RUN npm run build
+RUN npm run build --workspace=server
+
+RUN npm prune --production --workspace=apps/server
 
 
 # --- Stage 2: Production ---
@@ -41,10 +42,10 @@ WORKDIR /app
 COPY --from=builder /app/node_modules ./node_modules
 
 # Copy the server's package.json
-COPY --from=builder /app/package.json ./package.json
+COPY --from=builder /app/apps/server/package.json ./package.json
 
 # Copy the compiled application code from the builder stage
-COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/apps/server/dist ./dist
 
 # Create directory for HLS files
 RUN mkdir -p hls
@@ -53,5 +54,4 @@ RUN mkdir -p hls
 EXPOSE 3000
 EXPOSE 10000-10100/udp
 
-# Start the server
 CMD ["npm", "start"]
