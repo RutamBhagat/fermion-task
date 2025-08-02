@@ -652,6 +652,78 @@ export function setupSocketHandlers(io: Server) {
       }
     });
 
+    // Full WebRTC Connection Test
+    socket.on("webrtc-connection-test", async (data, callback) => {
+      try {
+        console.log(`WebRTC connection test from ${socket.id}`);
+        
+        const router = getLegacyRouter();
+        
+        // Create producer transport
+        const producerTransport = await router.createWebRtcTransport({
+          listenIps: [
+            {
+              ip: process.env.WEBRTC_LISTEN_IP || '0.0.0.0',
+              announcedIp: process.env.ANNOUNCED_IP || undefined,
+            }
+          ],
+          enableUdp: true,
+          enableTcp: true,
+          preferUdp: true,
+        });
+
+        // Monitor transport state changes
+        let connectionResult = {
+          success: false,
+          transportId: producerTransport.id,
+          initialDtlsState: producerTransport.dtlsState,
+          initialIceState: producerTransport.iceState,
+          iceCandidates: producerTransport.iceCandidates,
+          dtlsParameters: producerTransport.dtlsParameters,
+          iceParameters: producerTransport.iceParameters,
+          finalDtlsState: 'unknown',
+          finalIceState: 'unknown',
+          error: null
+        };
+
+        producerTransport.on('dtlsstatechange', (dtlsState) => {
+          console.log(`Transport ${producerTransport.id} DTLS state: ${dtlsState}`);
+          connectionResult.finalDtlsState = dtlsState;
+        });
+
+        producerTransport.on('icestatechange', (iceState) => {
+          console.log(`Transport ${producerTransport.id} ICE state: ${iceState}`);
+          connectionResult.finalIceState = iceState;
+        });
+
+        // Return transport details for browser to attempt connection
+        callback({
+          ...connectionResult,
+          transportParams: {
+            id: producerTransport.id,
+            iceParameters: producerTransport.iceParameters,
+            iceCandidates: producerTransport.iceCandidates,
+            dtlsParameters: producerTransport.dtlsParameters,
+          }
+        });
+
+        // Clean up after 10 seconds
+        setTimeout(() => {
+          if (!producerTransport.closed) {
+            console.log(`Cleaning up test transport ${producerTransport.id}`);
+            producerTransport.close();
+          }
+        }, 10000);
+
+      } catch (error) {
+        console.error('WebRTC connection test failed:', error);
+        callback({
+          success: false,
+          error: error instanceof Error ? error.message : "Unknown error",
+        });
+      }
+    });
+
     socket.on("disconnect", () => {
       console.log(`Client disconnected: ${socket.id}`);
 

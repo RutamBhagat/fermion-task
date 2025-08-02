@@ -113,12 +113,138 @@ export default function UDPTestPage() {
 				addResponse(`📊 RTP Codecs: ${response.router.rtpCapabilitiesCount}`);
 				addResponse(`🚀 Transport created successfully`);
 				addResponse(`📡 ICE Candidates: ${response.transport.iceCandidates.length}`);
+				
+				// Show ICE candidates details
+				response.transport.iceCandidates.forEach((candidate: any, index: number) => {
+					addResponse(`🧊 ICE[${index}]: ${candidate.ip}:${candidate.port} (${candidate.type})`);
+				});
+				
 				addResponse(`⚙️ WEBRTC_LISTEN_IP: ${response.config.WEBRTC_LISTEN_IP}`);
 				addResponse(`🌐 ANNOUNCED_IP: ${response.config.ANNOUNCED_IP}`);
+				
+				// Show potential issues
+				if (response.config.ANNOUNCED_IP !== '127.0.0.1' && response.config.ANNOUNCED_IP !== 'localhost') {
+					addResponse(`⚠️ WARNING: ANNOUNCED_IP is public IP but testing locally`);
+					addResponse(`💡 For local testing, try ANNOUNCED_IP=127.0.0.1`);
+				}
 			} else {
 				addResponse(`❌ Mediasoup health check failed: ${response.error}`);
 				addResponse(`⚙️ WEBRTC_LISTEN_IP: ${response.config.WEBRTC_LISTEN_IP}`);
 				addResponse(`🌐 ANNOUNCED_IP: ${response.config.ANNOUNCED_IP}`);
+			}
+		});
+	};
+
+	const testWebRTCConnection = () => {
+		if (!socket || !socket.connected) {
+			addResponse("❌ Socket.IO not connected");
+			return;
+		}
+
+		addResponse("🔗 Testing real WebRTC connection...");
+		
+		socket.emit("webrtc-connection-test", {}, async (response: any) => {
+			if (response.error) {
+				addResponse(`❌ Server failed to create transport: ${response.error}`);
+				return;
+			}
+			
+			addResponse("✅ Server created WebRTC transport");
+			addResponse(`🆔 Transport ID: ${response.transportId}`);
+			
+			// Show ICE candidates
+			response.iceCandidates.forEach((candidate: any, index: number) => {
+				addResponse(`🧊 ICE[${index}]: ${candidate.ip}:${candidate.port} (${candidate.type})`);
+			});
+			
+			// Create RTCPeerConnection and attempt actual connection
+			const pc = new RTCPeerConnection({
+				iceServers: []
+			});
+			
+			let iceConnectionComplete = false;
+			
+			pc.oniceconnectionstatechange = () => {
+				addResponse(`🧊 Browser ICE State: ${pc.iceConnectionState}`);
+				if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+					iceConnectionComplete = true;
+					addResponse("✅ ICE connection successful!");
+				} else if (pc.iceConnectionState === 'failed') {
+					addResponse("❌ ICE connection failed - IP/port not reachable");
+				}
+			};
+			
+			pc.onicegatheringstatechange = () => {
+				addResponse(`🧊 ICE Gathering: ${pc.iceGatheringState}`);
+			};
+			
+			pc.onconnectionstatechange = () => {
+				addResponse(`🔗 Connection State: ${pc.connectionState}`);
+			};
+			
+			try {
+				// Try to connect using the server's transport parameters
+				addResponse("🔄 Creating offer...");
+				
+				// Add a fake data channel to trigger connection
+				pc.createDataChannel("test");
+				
+				const offer = await pc.createOffer();
+				await pc.setLocalDescription(offer);
+				
+				addResponse("✅ Created offer, gathering ICE candidates...");
+				
+				// Wait for ICE gathering to complete
+				await new Promise<void>((resolve) => {
+					if (pc.iceGatheringState === 'complete') {
+						resolve();
+					} else {
+						pc.onicegatheringstatechange = () => {
+							if (pc.iceGatheringState === 'complete') {
+								resolve();
+							}
+						};
+					}
+				});
+				
+				addResponse("✅ ICE gathering complete");
+				addResponse(`📊 Browser gathered ${pc.localDescription?.sdp.split('a=candidate:').length - 1} candidates`);
+				
+				// Check if any browser candidates match server candidates
+				const browserCandidates = pc.localDescription?.sdp.match(/a=candidate:[^\r\n]+/g) || [];
+				const serverIPs = response.iceCandidates.map((c: any) => c.ip);
+				
+				// Show browser IPs
+				const browserIPs = new Set<string>();
+				browserCandidates.forEach((candidate: string) => {
+					const ip = candidate.match(/(\d+\.\d+\.\d+\.\d+)/)?.[1];
+					if (ip) browserIPs.add(ip);
+				});
+				
+				addResponse(`🖥️ Browser IPs: ${Array.from(browserIPs).join(', ')}`);
+				addResponse(`🐳 Server IPs: ${serverIPs.join(', ')}`);
+				
+				let hasMatchingNetwork = false;
+				browserIPs.forEach((browserIP) => {
+					if (serverIPs.includes(browserIP)) {
+						hasMatchingNetwork = true;
+						addResponse(`✅ Found matching network: ${browserIP}`);
+					}
+				});
+				
+				if (!hasMatchingNetwork) {
+					addResponse("❌ No matching networks between browser and server");
+					addResponse("💡 Browser and server are on different networks - this is the issue!");
+				}
+				
+				setTimeout(() => {
+					addResponse(`🔍 Final result: ICE=${pc.iceConnectionState}, Connection=${pc.connectionState}`);
+					pc.close();
+				}, 3000);
+				
+			} catch (error) {
+				addResponse(`❌ WebRTC connection failed: ${error}`);
+				pc.close();
 			}
 		});
 	};
@@ -171,6 +297,9 @@ export default function UDPTestPage() {
 						</Button>
 						<Button onClick={testMediasoupHealth} variant="outline" disabled={!isConnected}>
 							Test Mediasoup
+						</Button>
+						<Button onClick={testWebRTCConnection} variant="outline" disabled={!isConnected}>
+							Test WebRTC Connection
 						</Button>
 						<Button onClick={clearResponses} variant="outline">
 							Clear
