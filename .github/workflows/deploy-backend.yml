@@ -26,8 +26,7 @@ jobs:
         run: |
           mkdir -p deploy/apps
           cp package.json pnpm-workspace.yaml Dockerfile docker-compose.yml deploy/
-          # Copy pnpm-lock.yaml if it exists
-          [ -f pnpm-lock.yaml ] && cp pnpm-lock.yaml deploy/ || true
+          [ -f pnpm-lock.yaml ] && cp pnpm-lock.yaml deploy/ || echo "Warning: pnpm-lock.yaml not found"
           cp -r apps/server deploy/apps/
           tar -czf deploy.tar.gz -C deploy .
 
