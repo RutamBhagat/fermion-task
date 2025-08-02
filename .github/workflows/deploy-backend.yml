@@ -82,6 +82,18 @@ jobs:
             export NVM_DIR="$HOME/.nvm"
             [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
             
+            sudo apt-get update
+            
+            if ! command -v ffmpeg &> /dev/null; then
+                echo "Installing FFmpeg for HLS streaming..."
+                sudo apt-get install -y ffmpeg
+            fi
+            
+            sudo apt-get install -y python3 python3-pip build-essential pkg-config libssl-dev
+            
+            echo "Verifying FFmpeg codecs..."
+            ffmpeg -encoders | grep -E "(libx264|aac)" || echo "Warning: Some codecs may be missing"
+            
             cd /opt/hono-backend
             
             tar -xzf deploy.tar.gz
