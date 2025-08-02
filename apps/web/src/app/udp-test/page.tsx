@@ -152,7 +152,7 @@ export default function UDPTestPage() {
         if (response.success) {
           addResponse("✅ Mediasoup router healthy");
           addResponse(`📊 Router ID: ${response.router.id}`);
-          addResponse(`📊 RTP Codecs: ${response.router.rtpCapabilitiesCount}`);
+          addResponse(`📊 RTP Codecs: ${response.rtpCapabilitiesCount}`);
           addResponse("🚀 Transport created successfully");
           addResponse(
             `📡 ICE Candidates: ${response.transport.iceCandidates.length}`,
@@ -278,8 +278,9 @@ export default function UDPTestPage() {
           });
 
           addResponse("✅ ICE gathering complete");
+          const candidateCount = pc.localDescription?.sdp?.split("a=candidate:")?.length ?? 1;
           addResponse(
-            `📊 Browser gathered ${pc.localDescription?.sdp.split("a=candidate:").length - 1} candidates`,
+            `📊 Browser gathered ${candidateCount - 1} candidates`,
           );
 
           // Check if any browser candidates match server candidates
