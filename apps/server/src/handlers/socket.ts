@@ -1,6 +1,7 @@
 import type * as mediasoup from "mediasoup";
 import type { Server, Socket } from "socket.io";
 import type { SocketTransports } from "@/types/index.js";
+import { createSocket } from "node:dgram";
 import { webRtcTransportOptions } from "../config/mediasoup.js";
 import {
   createCompositeHLSStream,
@@ -545,6 +546,48 @@ export function setupSocketHandlers(io: Server) {
         console.error("Error stopping HLS stream:", error);
         callback({
           error: error instanceof Error ? error.message : "Unknown error",
+        });
+      }
+    });
+
+    // UDP Test Handler - allows browser to test UDP via WebSocket
+    socket.on("udp-test", (data) => {
+      try {
+        const { message, timestamp } = data;
+        console.log(`UDP Test via WebSocket: "${message}" from ${socket.id}`);
+        
+        // Create a temporary UDP client to test UDP connectivity
+        const udpClient = createSocket('udp4');
+        const testMessage = `WebSocket->UDP: ${message}`;
+        
+        udpClient.send(testMessage, 9999, 'localhost', (err) => {
+          if (err) {
+            console.error('UDP Test: Failed to send via UDP:', err);
+            socket.emit("udp-test-response", {
+              success: false,
+              error: err.message,
+              originalMessage: message,
+              timestamp
+            });
+          } else {
+            console.log(`UDP Test: Successfully sent "${testMessage}" to UDP echo server`);
+            socket.emit("udp-test-response", {
+              success: true,
+              message: `UDP test successful - sent "${testMessage}"`,
+              originalMessage: message,
+              timestamp
+            });
+          }
+          udpClient.close();
+        });
+        
+      } catch (error) {
+        console.error('UDP Test error:', error);
+        socket.emit("udp-test-response", {
+          success: false,
+          error: error instanceof Error ? error.message : "Unknown error",
+          originalMessage: data.message,
+          timestamp: data.timestamp
         });
       }
     });
