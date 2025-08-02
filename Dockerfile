@@ -13,24 +13,30 @@ RUN apk add --no-cache \
     openssl-dev \
     linux-headers
 
+# Install pnpm globally
+RUN corepack enable && corepack prepare pnpm@latest --activate
+
 WORKDIR /app
 
+# Copy workspace configuration and root package.json
 COPY package.json ./
-COPY package-lock.json ./
+COPY pnpm-workspace.yaml ./
 COPY apps/server/package.json ./apps/server/
 
-# Install all dependencies with increased timeouts for mediasoup compilation
-RUN npm config set fetch-timeout 600000 && \
-    npm config set fetch-retry-mintimeout 60000 && \
-    npm config set fetch-retry-maxtimeout 120000 && \
-    npm install --workspace=apps/server --verbose
+# Install dependencies with pnpm (includes mediasoup compilation)
+# Use --frozen-lockfile=false since we might not have pnpm-lock.yaml yet
+RUN pnpm config set network-timeout 600000 && \
+    pnpm config set fetch-retry-mintimeout 60000 && \
+    pnpm config set fetch-retry-maxtimeout 120000 && \
+    pnpm install --filter=server --frozen-lockfile=false
 
 COPY apps/server/ ./apps/server/
 
 # Build the application
-RUN npm run build --workspace=server
+RUN pnpm --filter=server build
 
-RUN npm prune --production --workspace=apps/server
+# Prune dev dependencies
+RUN pnpm --filter=server --prod install
 
 
 # --- Stage 2: Production ---
@@ -57,4 +63,4 @@ RUN mkdir -p hls
 EXPOSE 3000
 EXPOSE 10000-10100/udp
 
-CMD ["npm", "start"]
+CMD ["node", "dist/index.js"]

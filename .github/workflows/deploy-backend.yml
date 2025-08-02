@@ -9,7 +9,8 @@ on:
       - 'Dockerfile'
       - 'docker-compose.yml'
       - 'package.json'
-      - 'package-lock.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
       - 'turbo.json'
   workflow_dispatch:
 
@@ -24,7 +25,9 @@ jobs:
       - name: Create deployment package for Monorepo
         run: |
           mkdir -p deploy/apps
-          cp package.json package-lock.json Dockerfile docker-compose.yml deploy/
+          cp package.json pnpm-workspace.yaml Dockerfile docker-compose.yml deploy/
+          # Copy pnpm-lock.yaml if it exists
+          [ -f pnpm-lock.yaml ] && cp pnpm-lock.yaml deploy/ || true
           cp -r apps/server deploy/apps/
           tar -czf deploy.tar.gz -C deploy .
 

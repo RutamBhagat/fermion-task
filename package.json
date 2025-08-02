@@ -1,10 +1,6 @@
 {
   "name": "fermion-task",
   "private": true,
-  "workspaces": [
-    "apps/*",
-    "packages/*"
-  ],
   "scripts": {
     "check": "biome check --write .",
     "dev": "turbo dev",
@@ -19,5 +15,5 @@
     "turbo": "^2.5.4",
     "@biomejs/biome": "^2.1.2"
   },
-  "packageManager": "npm@10.9.2"
+  "packageManager": "pnpm@10.0.0"
 }
