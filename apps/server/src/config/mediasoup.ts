@@ -1,4 +1,4 @@
-import type { RtpCodecCapability, WebRtcTransportOptions, WorkerSettings } from "mediasoup/types";
+import type { PlainTransportOptions, RtpCodecCapability, WebRtcTransportOptions, WorkerSettings } from "mediasoup/types";
 
 export const mediaCodecs: RtpCodecCapability[] = [
   {
@@ -60,4 +60,13 @@ export const webRtcTransportOptions: WebRtcTransportOptions = {
   enableUdp: true,
   enableTcp: true,
   preferUdp: true,
+};
+
+export const plainTransportOptions: PlainTransportOptions = {
+  listenIp: {
+    ip: process.env.WEBRTC_LISTEN_IP || "127.0.0.1",
+    announcedIp: process.env.ANNOUNCED_IP || undefined,
+  },
+  rtcpMux: false,
+  comedia: false,
 };
