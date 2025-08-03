@@ -1,6 +1,6 @@
-import type * as mediasoup from "mediasoup";
+import type { RtpCodecCapability, WorkerSettings } from "mediasoup/types";
 
-export const mediaCodecs: mediasoup.types.RtpCodecCapability[] = [
+export const mediaCodecs: RtpCodecCapability[] = [
   {
     kind: "audio",
     mimeType: "audio/opus",
@@ -43,3 +43,9 @@ export const mediaCodecs: mediasoup.types.RtpCodecCapability[] = [
     },
   },
 ];
+
+export const workerSettings: WorkerSettings = {
+  logLevel: "debug",
+  rtcMinPort: 10000,
+  rtcMaxPort: 10100,
+};
