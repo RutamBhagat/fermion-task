@@ -1,3 +1,41 @@
+# Fermion Assignment - WebRTC Video Conferencing with HLS Streaming
+
+A full-stack WebRTC video conferencing application with live HLS streaming capabilities, built for the Fermion assignment.
+
+## Demo & Links
+
+- **GitHub**: https://github.com/RutamBhagat/fermion-task
+- **Video Demo**: https://drive.google.com/file/d/1eB_D3mIyDQxyEp4gjj7IhXkRNfF77hIW/view?usp=sharing
+- **Frontend**: https://fermion-task-web.vercel.app/stream
+- **Backend**: https://ec2-3-110-48-224.ap-south-1.compute.amazonaws.com
+
+## Assignment Requirements Fulfilled
+
+✅ **Page 1: `stream`** - Multi-user WebRTC video conferencing  
+✅ **Page 2: `watch`** - Live HLS streaming with DVR functionality  
+✅ **User Journey**: Users can video conference on `/stream`, viewers can watch live on `/watch`  
+✅ **No Blackbox Solutions**: Uses Mediasoup SFU (not LiveKit)  
+✅ **Functional Locally**: Complete local development setup
+
+## Key Technical Features
+
+### WebRTC Video Conferencing
+- **Mediasoup SFU**: Scalable video conferencing architecture
+- **Multi-user Support**: Real-time video/audio with multiple participants
+- **Socket.IO Signaling**: WebRTC connection management and room coordination
+
+### HLS Live Streaming with DVR
+- **WebRTC to HLS Conversion**: FFmpeg transcoding with composite video streams
+- **DVR Functionality**: Time-shifting, backward seeking during live streams
+- **Advanced Buffer Management**: Solved HLS live-edge jumping issues
+- **React Player Integration**: Custom HLS configuration for optimal DVR experience
+
+### Production Considerations
+- **Docker Compose Ready**: Container orchestration for deployment
+- **Resource Cleanup**: Automatic HLS segment cleanup and memory management  
+- **Error Handling**: Comprehensive error recovery for WebRTC and HLS streams
+- **Monitoring**: Performance tracking and health checks
+
 ## Common Development Commands
 
 ### Development Server
@@ -117,3 +155,40 @@ This is a **Turborepo monorepo** with two main applications:
 - **HTTPS**: Required for WebRTC - use `localhost` with HTTPS in production
 - **Ports**: Web (3001), Server (3000)
 - **CORS**: Server configured for cross-origin requests
+
+## Infrastructure Notes
+
+### Current Deployment Limitations
+- **AWS t2.micro**: Free tier instance gets resource-exhausted during HLS transcoding
+- **Self-signed SSL**: Backend uses self-signed certificate (visit backend URL to trust)
+- **HLS Storage**: Local disk storage (production would use CloudFlare R2 + CDN)
+
+### Production Recommendations
+- **Instance Type**: c7g.large or better for FFmpeg processing (63% better performance)
+- **SSL Certificate**: Domain + Let's Encrypt for proper HTTPS
+- **Storage**: CloudFlare R2 with CDN for HLS segment distribution
+- **Scaling**: Redis state sharing for multi-instance deployment
+
+## Technical Challenges Solved
+
+### DVR Implementation
+The most complex technical challenge was implementing true DVR functionality for HLS streams:
+
+- **Live Edge Jumping**: Solved with `liveDurationInfinity: true` configuration
+- **Infinite Back Buffer**: Allows unlimited backward seeking during live streams  
+- **Memory Management**: Balanced infinite history with controlled forward buffering
+- **React Player Integration**: Optimized HLS.js configuration within React Player
+
+### WebRTC to HLS Pipeline
+- **Multi-stream Composition**: FFmpeg xstack filter for grid layout
+- **Format Conversion**: Mediasoup PlainTransport to stable RTP streams
+- **Resource Management**: Automatic process cleanup and port allocation
+
+## Known Limitations (Scope Decisions)
+
+- **Single Composite Stream**: One HLS stream per room (expandable with worker pools)
+- **Late Join Handling**: Participants must join before HLS starts
+- **Horizontal Scaling**: Single-server implementation (designed for Redis scaling)
+- **Storage Strategy**: Local disk vs production CDN distribution
+
+These limitations represent intentional scope decisions demonstrating production awareness rather than technical constraints.
