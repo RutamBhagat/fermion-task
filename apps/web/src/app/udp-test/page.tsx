@@ -109,7 +109,9 @@ export default function UDPTestPage() {
 
   const testHTTPEndpoint = async () => {
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_SERVER_URL}/udp-test`);
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_SERVER_URL}/udp-test`,
+      );
       const data = await response.json();
       addResponse(`📡 HTTP Response: ${JSON.stringify(data, null, 2)}`);
     } catch (error) {

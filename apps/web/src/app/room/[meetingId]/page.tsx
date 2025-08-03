@@ -76,19 +76,27 @@ export default function RoomPage() {
         await initializeDevice(socket);
         const stream = await getMedia();
 
+        // Always proceed with setup, even if no media stream
+        setStatus(`Ready to join meeting: ${meetingId}`);
+        await createConsumerTransport(socket);
+
+        const existingProducers = await new Promise<
+          Array<{ producerId: string; socketId: string }>
+        >((resolve) => {
+          socket.emit("getProducers", { roomId: meetingId }, resolve);
+        });
+
+        for (const { socketId } of existingProducers) {
+          await createConsumer(socket, socketId);
+        }
+
+        // Update status based on media access level
         if (stream) {
           setStatus(`Ready to stream in meeting: ${meetingId}`);
-          await createConsumerTransport(socket);
-
-          const existingProducers = await new Promise<
-            Array<{ producerId: string; socketId: string }>
-          >((resolve) => {
-            socket.emit("getProducers", { roomId: meetingId }, resolve);
-          });
-
-          for (const { socketId } of existingProducers) {
-            await createConsumer(socket, socketId);
-          }
+        } else {
+          setStatus(
+            `Joined meeting: ${meetingId} - Enable camera/mic to stream`,
+          );
         }
       } catch (error) {
         console.error("Failed to initialize:", error);
@@ -136,12 +144,17 @@ export default function RoomPage() {
   ]);
 
   const handleJoinCall = async () => {
-    if (!socket || !localStream) return;
+    if (!socket) return;
 
     try {
-      setStatus("Starting stream...");
-      await startProducing(socket, localStream);
-      setStatus(`Streaming in meeting: ${meetingId}`);
+      if (localStream) {
+        setStatus("Starting stream...");
+        await startProducing(socket, localStream);
+        setStatus(`Streaming in meeting: ${meetingId}`);
+      } else {
+        // Join without media - user can enable later
+        setStatus(`Joined meeting: ${meetingId} - Enable camera/mic to stream`);
+      }
     } catch (error) {
       console.error("Failed to start producing:", error);
       setStatus("Failed to start streaming");
@@ -150,6 +163,14 @@ export default function RoomPage() {
 
   const handleLeaveCall = () => {
     router.push("/");
+  };
+
+  const handleToggleMute = async () => {
+    await toggleMute();
+  };
+
+  const handleToggleVideo = async () => {
+    await toggleVideo();
   };
 
   const handleCopyMeetingLink = () => {
@@ -192,8 +213,8 @@ export default function RoomPage() {
         isStartingHls={isStartingHls}
         showControls={showControls}
         status={status}
-        onToggleMute={toggleMute}
-        onToggleVideo={toggleVideo}
+        onToggleMute={handleToggleMute}
+        onToggleVideo={handleToggleVideo}
         onJoinCall={handleJoinCall}
         onLeaveCall={handleLeaveCall}
         onStartHls={handleStartHls}
