@@ -23,7 +23,6 @@ export function useMediaDevices() {
 
   const getMedia = useCallback(async () => {
     try {
-      // First, try to get both audio and video with optimized constraints
       console.log(
         "Attempting to get full media access (audio + video) with quality level:",
         qualityLevel,
@@ -36,7 +35,6 @@ export function useMediaDevices() {
       setMediaAccessLevel("full");
       setCanEnableVideo(true);
 
-      // Check if video track is actually working
       const videoTrack = stream.getVideoTracks()[0];
       if (!videoTrack || !videoTrack.enabled) {
         setIsVideoOff(true);
@@ -51,7 +49,6 @@ export function useMediaDevices() {
       );
 
       try {
-        // Fallback to audio-only with optimized audio constraints
         const audioStream = await navigator.mediaDevices.getUserMedia({
           video: false,
           audio: audioConstraints.highQuality,
@@ -71,7 +68,6 @@ export function useMediaDevices() {
           audioError,
         );
 
-        // Allow joining without any media
         setHasPermissions(true);
         setMediaAccessLevel("none");
         setIsMuted(true);
@@ -106,7 +102,6 @@ export function useMediaDevices() {
         localStreamRef.current &&
         !localStreamRef.current.getAudioTracks().length
       ) {
-        // Add audio to existing video stream
         const audioStream = await navigator.mediaDevices.getUserMedia({
           video: false,
           audio: audioConstraints.highQuality,
@@ -141,11 +136,9 @@ export function useMediaDevices() {
         setIsMuted(!audioTrack.enabled);
         toast.success(audioTrack.enabled ? "Microphone on" : "Microphone off");
       } else if (mediaAccessLevel === "none") {
-        // No audio track, try to enable audio
         await enableAudio();
       }
     } else if (mediaAccessLevel === "none") {
-      // No stream at all, try to get audio
       await enableAudio();
     }
   }, [mediaAccessLevel, enableAudio]);
@@ -155,7 +148,6 @@ export function useMediaDevices() {
       console.log("Attempting to enable video...");
 
       if (mediaAccessLevel === "audio-only" && localStreamRef.current) {
-        // We have audio, try to add video to existing stream
         const videoConstraint =
           qualityLevel in videoConstraints
             ? videoConstraints[qualityLevel as keyof typeof videoConstraints]
@@ -167,7 +159,6 @@ export function useMediaDevices() {
 
         const videoTrack = videoStream.getVideoTracks()[0];
         if (videoTrack) {
-          // Add video track to existing stream
           localStreamRef.current.addTrack(videoTrack);
           setIsVideoOff(false);
           setMediaAccessLevel("full");
@@ -176,7 +167,6 @@ export function useMediaDevices() {
           return true;
         }
       } else if (mediaAccessLevel === "none") {
-        // No media at all, try to get video + audio
         try {
           const constraints = getMediaConstraintsWithFallback(qualityLevel);
           const stream = await navigator.mediaDevices.getUserMedia(constraints);
@@ -189,7 +179,6 @@ export function useMediaDevices() {
           toast.success("Camera and microphone enabled!");
           return true;
         } catch {
-          // Fallback to video only
           const videoConstraint =
             qualityLevel in videoConstraints
               ? videoConstraints[qualityLevel as keyof typeof videoConstraints]
@@ -200,7 +189,7 @@ export function useMediaDevices() {
           });
 
           localStreamRef.current = videoStream;
-          setMediaAccessLevel("audio-only"); // We only have video, but keep as audio-only state
+          setMediaAccessLevel("audio-only");
           setCanEnableVideo(true);
           setIsVideoOff(false);
           toast.success("Camera enabled!");
@@ -221,7 +210,6 @@ export function useMediaDevices() {
     if (localStreamRef.current) {
       const videoTrack = localStreamRef.current.getVideoTracks()[0];
       if (videoTrack) {
-        // Toggle existing video track
         videoTrack.enabled = !videoTrack.enabled;
         setIsVideoOff(!videoTrack.enabled);
         toast.success(videoTrack.enabled ? "Camera on" : "Camera off");
@@ -229,11 +217,9 @@ export function useMediaDevices() {
         mediaAccessLevel === "audio-only" ||
         mediaAccessLevel === "none"
       ) {
-        // Try to add video to existing stream or create new stream
         await enableVideo();
       }
     } else if (mediaAccessLevel === "none") {
-      // No stream at all, try to get one with video
       await enableVideo();
     }
   }, [mediaAccessLevel, enableVideo]);

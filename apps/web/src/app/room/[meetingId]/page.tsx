@@ -76,7 +76,6 @@ export default function RoomPage() {
         await initializeDevice(socket);
         const stream = await getMedia();
 
-        // Always proceed with setup, even if no media stream
         setStatus(`Ready to join meeting: ${meetingId}`);
         await createConsumerTransport(socket);
 
@@ -90,7 +89,6 @@ export default function RoomPage() {
           await createConsumer(socket, socketId);
         }
 
-        // Update status based on media access level
         if (stream) {
           setStatus(`Ready to stream in meeting: ${meetingId}`);
         } else {
@@ -152,7 +150,6 @@ export default function RoomPage() {
         await startProducing(socket, localStream);
         setStatus(`Streaming in meeting: ${meetingId}`);
       } else {
-        // Join without media - user can enable later
         setStatus(`Joined meeting: ${meetingId} - Enable camera/mic to stream`);
       }
     } catch (error) {
