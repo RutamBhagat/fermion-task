@@ -3,9 +3,10 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { serve } from "@hono/node-server";
-import { initMediasoup } from "./services/mediasoup.js";
+import { initMediasoup } from "@/services/mediasoup";
 import { Server } from "socket.io";
-import { tryCatch } from "./utils/try-catch.js";
+import { tryCatch } from "@/utils/try-catch";
+import { setupSocketHandlers } from "@/handlers/socket";
 
 const app = new Hono();
 
@@ -47,12 +48,7 @@ async function startServer() {
     },
   });
 
-  io.on("connection", (socket) => {
-    console.log(`Client connected: ${socket.id}`);
-    socket.on("disconnect", () => {
-      console.log(`Client disconnected: ${socket.id}`);
-    });
-  });
+  setupSocketHandlers(io);
 }
 
 startServer();
