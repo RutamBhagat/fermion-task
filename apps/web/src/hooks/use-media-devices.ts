@@ -2,6 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import {
+  audioConstraints,
+  getMediaConstraintsWithFallback,
+  type QualityLevel,
+  videoConstraints,
+} from "@/config/media-constraints";
 
 export type MediaAccessLevel = "full" | "audio-only" | "none";
 
@@ -12,16 +18,18 @@ export function useMediaDevices() {
   const [mediaAccessLevel, setMediaAccessLevel] =
     useState<MediaAccessLevel>("none");
   const [canEnableVideo, setCanEnableVideo] = useState(false);
+  const [qualityLevel, setQualityLevel] = useState<QualityLevel>("standard");
   const localStreamRef = useRef<MediaStream | null>(null);
 
   const getMedia = useCallback(async () => {
     try {
-      // First, try to get both audio and video
-      console.log("Attempting to get full media access (audio + video)...");
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: true,
-      });
+      // First, try to get both audio and video with optimized constraints
+      console.log(
+        "Attempting to get full media access (audio + video) with quality level:",
+        qualityLevel,
+      );
+      const constraints = getMediaConstraintsWithFallback(qualityLevel);
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
 
       localStreamRef.current = stream;
       setHasPermissions(true);
@@ -43,10 +51,10 @@ export function useMediaDevices() {
       );
 
       try {
-        // Fallback to audio-only
+        // Fallback to audio-only with optimized audio constraints
         const audioStream = await navigator.mediaDevices.getUserMedia({
           video: false,
-          audio: true,
+          audio: audioConstraints.highQuality,
         });
 
         localStreamRef.current = audioStream;
@@ -76,7 +84,7 @@ export function useMediaDevices() {
         return null;
       }
     }
-  }, []);
+  }, [qualityLevel]);
 
   const enableAudio = useCallback(async () => {
     try {
@@ -85,7 +93,7 @@ export function useMediaDevices() {
       if (mediaAccessLevel === "none") {
         const audioStream = await navigator.mediaDevices.getUserMedia({
           video: false,
-          audio: true,
+          audio: audioConstraints.highQuality,
         });
 
         localStreamRef.current = audioStream;
@@ -101,7 +109,7 @@ export function useMediaDevices() {
         // Add audio to existing video stream
         const audioStream = await navigator.mediaDevices.getUserMedia({
           video: false,
-          audio: true,
+          audio: audioConstraints.highQuality,
         });
 
         const audioTrack = audioStream.getAudioTracks()[0];
@@ -148,8 +156,12 @@ export function useMediaDevices() {
 
       if (mediaAccessLevel === "audio-only" && localStreamRef.current) {
         // We have audio, try to add video to existing stream
+        const videoConstraint =
+          qualityLevel in videoConstraints
+            ? videoConstraints[qualityLevel as keyof typeof videoConstraints]
+            : videoConstraints.standard;
         const videoStream = await navigator.mediaDevices.getUserMedia({
-          video: true,
+          video: videoConstraint,
           audio: false,
         });
 
@@ -166,10 +178,8 @@ export function useMediaDevices() {
       } else if (mediaAccessLevel === "none") {
         // No media at all, try to get video + audio
         try {
-          const stream = await navigator.mediaDevices.getUserMedia({
-            video: true,
-            audio: true,
-          });
+          const constraints = getMediaConstraintsWithFallback(qualityLevel);
+          const stream = await navigator.mediaDevices.getUserMedia(constraints);
 
           localStreamRef.current = stream;
           setMediaAccessLevel("full");
@@ -180,8 +190,12 @@ export function useMediaDevices() {
           return true;
         } catch {
           // Fallback to video only
+          const videoConstraint =
+            qualityLevel in videoConstraints
+              ? videoConstraints[qualityLevel as keyof typeof videoConstraints]
+              : videoConstraints.standard;
           const videoStream = await navigator.mediaDevices.getUserMedia({
-            video: true,
+            video: videoConstraint,
             audio: false,
           });
 
@@ -201,7 +215,7 @@ export function useMediaDevices() {
       return false;
     }
     return false;
-  }, [mediaAccessLevel]);
+  }, [mediaAccessLevel, qualityLevel]);
 
   const toggleVideo = useCallback(async () => {
     if (localStreamRef.current) {
@@ -245,6 +259,8 @@ export function useMediaDevices() {
     hasPermissions,
     mediaAccessLevel,
     canEnableVideo,
+    qualityLevel,
+    setQualityLevel,
     getMedia,
     toggleMute,
     toggleVideo,
