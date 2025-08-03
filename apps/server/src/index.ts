@@ -24,31 +24,31 @@ app.get("/", (c) => {
 });
 
 async function startServer() {
-  const [_, error] = await tryCatch(initMediasoup());
+  try {
+    await initMediasoup();
 
-  if (error) {
-    console.error("Failed to initialize mediasoup:", error);
+    const httpServer = serve(
+      {
+        fetch: app.fetch,
+        port: Number(process.env.PORT) || 3000,
+      },
+      (info) => {
+        console.log(`Server is running on http://localhost:${info.port}`);
+      }
+    );
+
+    const io = new Server(httpServer, {
+      cors: {
+        origin: process.env.CORS_ORIGIN || "*",
+        methods: ["GET", "POST"],
+      },
+    });
+
+    setupSocketHandlers(io);
+  } catch (error) {
+    console.error("Failed to initialize server:", error);
     process.exit(1);
   }
-
-  const httpServer = serve(
-    {
-      fetch: app.fetch,
-      port: Number(process.env.PORT) || 3000,
-    },
-    (info) => {
-      console.log(`Server is running on http://localhost:${info.port}`);
-    }
-  );
-
-  const io = new Server(httpServer, {
-    cors: {
-      origin: process.env.CORS_ORIGIN || "*",
-      methods: ["GET", "POST"],
-    },
-  });
-
-  setupSocketHandlers(io);
 }
 
 startServer();
