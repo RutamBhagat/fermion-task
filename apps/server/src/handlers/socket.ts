@@ -217,7 +217,32 @@ export function setupSocketHandlers(io: Server) {
     });
 
     socket.on("disconnect", () => {
-      console.log(`A client disconnected in the new handler: ${socket.id}`);
+      console.log(`Client disconnected: ${socket.id}`);
+
+      const transportsForSocket = legacyTransports.get(socket.id);
+      const producerList = legacyProducers.get(socket.id);
+
+      if (transportsForSocket) {
+        if (transportsForSocket.producer) transportsForSocket.producer.close();
+        if (transportsForSocket.consumer) transportsForSocket.consumer.close();
+      }
+
+      if (producerList) {
+        producerList.forEach((producer) => producer.close());
+      }
+
+      for (const [consumerId, consumer] of legacyConsumers) {
+        if (consumer.appData?.socketId === socket.id) {
+          consumer.close();
+          legacyConsumers.delete(consumerId);
+        }
+      }
+
+      legacyTransports.delete(socket.id);
+      legacyProducers.delete(socket.id);
+
+      // Let other clients know this producer has left
+      socket.broadcast.emit("producerClosed", { socketId: socket.id });
     });
   });
 }
