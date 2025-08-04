@@ -161,7 +161,7 @@ export function setupSocketHandlers(io: Server) {
           return;
         }
 
-        const consumerParams = [];
+        const consumerParamsArray = [];
 
         for (const producer of consumableProducers) {
           const consumer = await transport.consume({
@@ -176,7 +176,7 @@ export function setupSocketHandlers(io: Server) {
 
           legacyConsumers.set(consumer.id, consumer);
 
-          consumerParams.push({
+          consumerParamsArray.push({
             id: consumer.id,
             producerId: producer.id,
             kind: consumer.kind,
@@ -184,7 +184,7 @@ export function setupSocketHandlers(io: Server) {
           });
         }
 
-        callback({ params: consumerParams });
+        callback({ params: consumerParamsArray });
       } catch (error) {
         console.error("Error consuming:", error);
         callback({
