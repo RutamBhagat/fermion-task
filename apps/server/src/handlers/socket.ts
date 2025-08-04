@@ -149,12 +149,11 @@ export function setupSocketHandlers(io: Server) {
           return;
         }
 
-        const consumableProducers = producerList.filter(
-          (p: Producer) =>
-            router.canConsume({
-              producerId: p.id,
-              rtpCapabilities,
-            })
+        const consumableProducers = producerList.filter((p: Producer) =>
+          router.canConsume({
+            producerId: p.id,
+            rtpCapabilities,
+          })
         );
 
         if (consumableProducers.length === 0) {
@@ -188,6 +187,29 @@ export function setupSocketHandlers(io: Server) {
         callback({ params: consumerParams });
       } catch (error) {
         console.error("Error consuming:", error);
+        callback({
+          error: error instanceof Error ? error.message : "Unknown error",
+        });
+      }
+    });
+
+    socket.on("resume", async (data, callback) => {
+      try {
+        const { consumerId } = data;
+        const consumer = legacyConsumers.get(consumerId);
+
+        if (!consumer) {
+          throw new Error(`Consumer not found: ${consumerId}`);
+        }
+
+        if (consumer.paused) {
+          await consumer.resume();
+          console.log(`Consumer resumed: ${consumerId}`);
+        }
+
+        callback();
+      } catch (error) {
+        console.error("Error resuming consumer:", error);
         callback({
           error: error instanceof Error ? error.message : "Unknown error",
         });
