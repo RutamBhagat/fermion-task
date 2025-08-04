@@ -16,6 +16,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 
 interface ControlBarProps {
   isConnected: boolean;
@@ -56,9 +57,10 @@ export function ControlBar({
 }: ControlBarProps) {
   return (
     <div
-      className={`absolute right-0 bottom-0 left-0 z-20 bg-gradient-to-t from-black/50 to-transparent p-6 transition-opacity duration-300 ${
+      className={cn(
+        "absolute right-0 bottom-0 left-0 z-20 bg-gradient-to-t from-black/50 to-transparent p-6 transition-opacity duration-300",
         showControls ? "opacity-100" : "opacity-0"
-      }`}
+      )}
     >
       <div className="flex items-center justify-center gap-4">
         <Tooltip>
@@ -67,11 +69,12 @@ export function ControlBar({
               onClick={onToggleMute}
               size="lg"
               variant={isMuted ? "destructive" : "secondary"}
-              className={`h-12 w-12 rounded-full ${
+              className={cn(
+                "h-12 w-12 rounded-full",
                 isMuted
                   ? "bg-red-600 hover:bg-red-700"
                   : "bg-gray-700 hover:bg-gray-600"
-              }`}
+              )}
             >
               {isMuted ? (
                 <MicOff className="h-5 w-5" />
@@ -89,11 +92,12 @@ export function ControlBar({
               onClick={onToggleVideo}
               size="lg"
               variant={isVideoOff ? "destructive" : "secondary"}
-              className={`h-12 w-12 rounded-full ${
+              className={cn(
+                "h-12 w-12 rounded-full",
                 isVideoOff
                   ? "bg-red-600 hover:bg-red-700"
                   : "bg-gray-700 hover:bg-gray-600"
-              }`}
+              )}
             >
               {isVideoOff ? (
                 <VideoOff className="h-5 w-5" />
@@ -144,13 +148,14 @@ export function ControlBar({
               disabled={isStartingHls}
               size="lg"
               variant={isHlsStreaming ? "destructive" : "secondary"}
-              className={`h-12 w-12 rounded-full ${
+              className={cn(
+                "h-12 w-12 rounded-full",
                 isHlsStreaming
                   ? "bg-red-600 hover:bg-red-700"
                   : isStartingHls
                   ? "bg-blue-600 hover:bg-blue-700"
                   : "bg-gray-700 hover:bg-gray-600"
-              }`}
+              )}
             >
               {isStartingHls ? (
                 <Loader2 className="h-5 w-5 animate-spin" />
