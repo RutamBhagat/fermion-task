@@ -170,6 +170,39 @@ export function useWebRTC() {
     []
   );
 
+  const handleNewProducer = useCallback(
+    async (socket: Socket, params: { socketId: string }) => {
+      await createConsumer(socket, params.socketId);
+    },
+    [createConsumer]
+  );
+
+  const handleProducerClosed = useCallback((params: { socketId: string }) => {
+    console.log(`Producer closed: ${params.socketId}, cleaning up consumers.`);
+    setRemoteParticipants((prev) =>
+      prev.filter((p) => p.socketId !== params.socketId)
+    );
+  }, []);
+
+  const cleanup = useCallback(() => {
+    producersRef.current.forEach((producer) => producer.close());
+    consumersRef.current.forEach((consumer) => consumer.close());
+
+    if (producerTransportRef.current) {
+      producerTransportRef.current.close();
+      producerTransportRef.current = null;
+    }
+    if (consumerTransportRef.current) {
+      consumerTransportRef.current.close();
+      consumerTransportRef.current = null;
+    }
+
+    producersRef.current = [];
+    consumersRef.current = [];
+    setIsProducing(false);
+    setRemoteParticipants([]);
+  }, []);
+
   return {
     isProducing,
     remoteParticipants,
@@ -177,5 +210,8 @@ export function useWebRTC() {
     createConsumerTransport,
     createConsumer,
     createProducerTransportAndStartProducing,
+    handleNewProducer,
+    handleProducerClosed,
+    cleanup,
   };
 }
