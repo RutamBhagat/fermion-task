@@ -48,6 +48,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@radix-ui/react-tooltip':
+        specifier: ^1.2.7
+        version: 1.2.7(@types/react-dom@19.1.7(@types/react@19.1.9))(@types/react@19.1.9)(react-dom@19.1.1(react@19.1.1))(react@19.1.1)
       '@tanstack/react-form':
         specifier: ^1.12.3
         version: 1.15.2(react-dom@19.1.1(react@19.1.1))(react@19.1.1)
