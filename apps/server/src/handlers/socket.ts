@@ -1,6 +1,9 @@
 import { webRtcTransportOptions } from "@/config/mediasoup";
 import { getLegacyRouter } from "@/services/mediasoup";
+import type { SocketTransports } from "@/types";
 import type { Server, Socket } from "socket.io";
+
+const legacyTransports = new Map<string, SocketTransports>();
 
 export function setupSocketHandlers(io: Server) {
   io.on("connection", (socket: Socket) => {
@@ -21,10 +24,26 @@ export function setupSocketHandlers(io: Server) {
 
     socket.on("createWebRtcTransport", async (data, callback) => {
       try {
+        const { type } = data;
         const router = getLegacyRouter();
         const transport = await router.createWebRtcTransport(
           webRtcTransportOptions
         );
+
+        if (!legacyTransports.has(socket.id)) {
+          legacyTransports.set(socket.id, {});
+        }
+
+        const transportType = type || "producer";
+        const socketTransports = legacyTransports.get(socket.id);
+
+        if (socketTransports) {
+          if (transportType === "producer") {
+            socketTransports.producer = transport;
+          } else {
+            socketTransports.consumer = transport;
+          }
+        }
 
         callback({
           params: {
