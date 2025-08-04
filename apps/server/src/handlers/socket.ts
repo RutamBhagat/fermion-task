@@ -1,9 +1,11 @@
 import { webRtcTransportOptions } from "@/config/mediasoup";
 import { getLegacyRouter } from "@/services/mediasoup";
 import type { SocketTransports } from "@/types";
+import type { Producer } from "mediasoup/types";
 import type { Server, Socket } from "socket.io";
 
 const legacyTransports = new Map<string, SocketTransports>();
+const legacyProducers = new Map<string, Producer[]>();
 
 export function setupSocketHandlers(io: Server) {
   io.on("connection", (socket: Socket) => {
@@ -79,11 +81,48 @@ export function setupSocketHandlers(io: Server) {
           throw new Error("Transport not found");
         }
 
-        // Connect the server-side transport
         await transport.connect({ dtlsParameters });
         callback();
       } catch (error) {
         console.error("Error connecting transport:", error);
+        callback({
+          error: error instanceof Error ? error.message : "Unknown error",
+        });
+      }
+    });
+
+    socket.on("produce", async (data, callback) => {
+      try {
+        const { kind, rtpParameters } = data;
+        const transportsForSocket = legacyTransports.get(socket.id);
+        const transport = transportsForSocket?.producer;
+
+        if (!transport) {
+          throw new Error("Producer transport not found");
+        }
+
+        const producer = await transport.produce({
+          kind,
+          rtpParameters,
+        });
+
+        if (!legacyProducers.has(socket.id)) {
+          legacyProducers.set(socket.id, []);
+        }
+        const producerList = legacyProducers.get(socket.id);
+        if (producerList) {
+          producerList.push(producer);
+        }
+
+        // Let other clients know (except the one that sent the produce request) a new producer is available
+        socket.broadcast.emit("newProducer", {
+          producerId: producer.id,
+          socketId: socket.id,
+        });
+
+        callback({ id: producer.id });
+      } catch (error) {
+        console.error("Error producing:", error);
         callback({
           error: error instanceof Error ? error.message : "Unknown error",
         });
