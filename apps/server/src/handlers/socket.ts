@@ -115,7 +115,7 @@ export function setupSocketHandlers(io: Server) {
           producerList.push(producer);
         }
 
-        // Let other clients know (except the one that sent the produce request) a new producer is available
+        // Let other clients know a new producer is available
         socket.broadcast.emit("newProducer", {
           producerId: producer.id,
           socketId: socket.id,

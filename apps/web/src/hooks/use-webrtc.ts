@@ -9,6 +9,7 @@ import type {
   IceParameters,
   Consumer,
   RtpParameters,
+  Producer,
 } from "mediasoup-client/types";
 import { useCallback, useRef, useState } from "react";
 import type { Socket } from "socket.io-client";
@@ -29,6 +30,8 @@ export function useWebRTC() {
   const deviceRef = useRef<Device | null>(null);
   const consumerTransportRef = useRef<Transport | null>(null);
   const consumersRef = useRef<Consumer[]>([]);
+  const producerTransportRef = useRef<Transport | null>(null);
+  const producersRef = useRef<Producer[]>([]);
 
   const initializeDevice = useCallback(async (socket: Socket) => {
     const { rtpCapabilities } = await new Promise<{
@@ -117,11 +120,62 @@ export function useWebRTC() {
     []
   );
 
+  const createProducerTransportAndStartProducing = useCallback(
+    async (socket: Socket, localStream: MediaStream) => {
+      if (!deviceRef.current || !localStream) return;
+
+      const { params } = await new Promise<TransportParams>((resolve) => {
+        socket.emit("createWebRtcTransport", { type: "producer" }, resolve);
+      });
+      const transport = deviceRef.current.createSendTransport(params);
+      producerTransportRef.current = transport;
+
+      transport.on("connect", async ({ dtlsParameters }, callback) => {
+        socket.emit(
+          "connectTransport",
+          { transportId: transport.id, dtlsParameters },
+          callback
+        );
+      });
+
+      transport.on("produce", async (parameters, callback) => {
+        const { id } = await new Promise<{ id: string }>((resolve) => {
+          socket.emit(
+            "produce",
+            {
+              kind: parameters.kind,
+              rtpParameters: parameters.rtpParameters,
+            },
+            resolve
+          );
+        });
+        callback({ id });
+      });
+
+      const videoTrack = localStream.getVideoTracks()[0];
+      if (videoTrack) {
+        const videoProducer = await transport.produce({ track: videoTrack });
+        producersRef.current.push(videoProducer);
+      }
+      const audioTrack = localStream.getAudioTracks()[0];
+      if (audioTrack) {
+        const audioProducer = await transport.produce({ track: audioTrack });
+        producersRef.current.push(audioProducer);
+      }
+
+      if (producersRef.current.length > 0) {
+        setIsProducing(true);
+      }
+    },
+    []
+  );
+
   return {
     isProducing,
     remoteParticipants,
     initializeDevice,
     createConsumerTransport,
     createConsumer,
+    createProducerTransportAndStartProducing,
   };
 }
