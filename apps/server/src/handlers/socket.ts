@@ -1,11 +1,12 @@
 import { webRtcTransportOptions } from "@/config/mediasoup";
 import { getLegacyRouter } from "@/services/mediasoup";
 import type { SocketTransports } from "@/types";
-import type { Producer } from "mediasoup/types";
+import type { Consumer, Producer } from "mediasoup/types";
 import type { Server, Socket } from "socket.io";
 
 const legacyTransports = new Map<string, SocketTransports>();
 const legacyProducers = new Map<string, Producer[]>();
+const legacyConsumers = new Map<string, Consumer>();
 
 export function setupSocketHandlers(io: Server) {
   io.on("connection", (socket: Socket) => {
@@ -123,6 +124,70 @@ export function setupSocketHandlers(io: Server) {
         callback({ id: producer.id });
       } catch (error) {
         console.error("Error producing:", error);
+        callback({
+          error: error instanceof Error ? error.message : "Unknown error",
+        });
+      }
+    });
+
+    socket.on("consume", async (data, callback) => {
+      try {
+        const { producerSocketId, rtpCapabilities } = data;
+        const router = getLegacyRouter();
+        const transportsForSocket = legacyTransports.get(socket.id);
+        const transport = transportsForSocket?.consumer;
+
+        if (!transport) {
+          callback({ error: "Consumer transport not found" });
+          return;
+        }
+
+        const producerList = legacyProducers.get(producerSocketId);
+
+        if (!producerList || producerList.length === 0) {
+          callback({ error: "No producers found for socket" });
+          return;
+        }
+
+        const consumableProducers = producerList.filter(
+          (p: Producer) =>
+            router.canConsume({
+              producerId: p.id,
+              rtpCapabilities,
+            })
+        );
+
+        if (consumableProducers.length === 0) {
+          callback({ error: "No consumable producers found" });
+          return;
+        }
+
+        const consumerParams = [];
+
+        for (const producer of consumableProducers) {
+          const consumer = await transport.consume({
+            producerId: producer.id,
+            rtpCapabilities,
+            paused: true,
+            appData: {
+              socketId: socket.id,
+              producerSocketId,
+            },
+          });
+
+          legacyConsumers.set(consumer.id, consumer);
+
+          consumerParams.push({
+            id: consumer.id,
+            producerId: producer.id,
+            kind: consumer.kind,
+            rtpParameters: consumer.rtpParameters,
+          });
+        }
+
+        callback({ params: consumerParams });
+      } catch (error) {
+        console.error("Error consuming:", error);
         callback({
           error: error instanceof Error ? error.message : "Unknown error",
         });
