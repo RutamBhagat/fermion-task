@@ -61,6 +61,35 @@ export function setupSocketHandlers(io: Server) {
       }
     });
 
+    socket.on("connectTransport", async (data, callback) => {
+      try {
+        const { transportId, dtlsParameters } = data;
+        const transportsForSocket = legacyTransports.get(socket.id);
+
+        if (!transportsForSocket) {
+          throw new Error("No transports found for socket");
+        }
+
+        // Find the transport (could be producer or consumer)
+        const transport = Object.values(transportsForSocket).find(
+          (t) => t && t.id === transportId
+        );
+
+        if (!transport) {
+          throw new Error("Transport not found");
+        }
+
+        // Connect the server-side transport
+        await transport.connect({ dtlsParameters });
+        callback();
+      } catch (error) {
+        console.error("Error connecting transport:", error);
+        callback({
+          error: error instanceof Error ? error.message : "Unknown error",
+        });
+      }
+    });
+
     socket.on("disconnect", () => {
       console.log(`A client disconnected in the new handler: ${socket.id}`);
     });
