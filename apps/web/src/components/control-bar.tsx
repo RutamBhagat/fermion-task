@@ -19,13 +19,13 @@ import {
 import { cn } from "@/lib/utils";
 
 interface ControlBarProps {
-  isConnected: boolean;
+  // isConnected: boolean;
   isProducing: boolean;
   isMuted: boolean;
   isVideoOff: boolean;
   isHlsStreaming: boolean;
   isStartingHls: boolean;
-  showControls: boolean;
+  // showControls: boolean;
   status?: string;
   onToggleMute: () => void;
   onToggleVideo: () => void;
@@ -33,18 +33,18 @@ interface ControlBarProps {
   onLeaveCall: () => void;
   onStartHls: () => void;
   onStopHls: () => void;
-  onCopyMeetingLink: () => void;
-  canJoinCall: boolean;
+  // onCopyMeetingLink: () => void;
+  // canJoinCall: boolean;
 }
 
 export function ControlBar({
-  isConnected,
+  // isConnected,
   isProducing,
   isMuted,
   isVideoOff,
   isHlsStreaming,
   isStartingHls,
-  showControls,
+  // showControls,
   status,
   onToggleMute,
   onToggleVideo,
@@ -52,14 +52,18 @@ export function ControlBar({
   onLeaveCall,
   onStartHls,
   onStopHls,
-  onCopyMeetingLink,
-  canJoinCall,
-}: ControlBarProps) {
+}: // onCopyMeetingLink,
+// canJoinCall,
+ControlBarProps) {
   return (
     <div
+      // className={cn(
+      //   "absolute right-0 bottom-0 left-0 z-20 bg-gradient-to-t from-black/50 to-transparent p-6 transition-opacity duration-300",
+      //   showControls ? "opacity-100" : "opacity-0"
+      // )}
       className={cn(
         "absolute right-0 bottom-0 left-0 z-20 bg-gradient-to-t from-black/50 to-transparent p-6 transition-opacity duration-300",
-        showControls ? "opacity-100" : "opacity-0"
+        true ? "opacity-100" : "opacity-0"
       )}
     >
       <div className="flex items-center justify-center gap-4">
@@ -112,19 +116,34 @@ export function ControlBar({
         </Tooltip>
 
         {!isProducing ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                onClick={onJoinCall}
-                disabled={!canJoinCall}
-                size="lg"
-                className="h-12 rounded-full bg-green-600 px-6 text-white hover:bg-green-700"
-              >
-                Join Call
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Join the meeting</TooltipContent>
-          </Tooltip>
+          <>
+            {/* <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  onClick={onJoinCall}
+                  disabled={!canJoinCall}
+                  size="lg"
+                  className="h-12 rounded-full bg-green-600 px-6 text-white hover:bg-green-700"
+                >
+                  Join Call
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Join the meeting</TooltipContent>
+            </Tooltip> */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  onClick={onJoinCall}
+                  disabled={false}
+                  size="lg"
+                  className="h-12 rounded-full bg-green-600 px-6 text-white hover:bg-green-700"
+                >
+                  Join Call
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Join the meeting</TooltipContent>
+            </Tooltip>
+          </>
         ) : (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -173,7 +192,7 @@ export function ControlBar({
           </TooltipContent>
         </Tooltip>
 
-        <Tooltip>
+        {/* <Tooltip>
           <TooltipTrigger asChild>
             <Button
               onClick={onCopyMeetingLink}
@@ -185,14 +204,14 @@ export function ControlBar({
             </Button>
           </TooltipTrigger>
           <TooltipContent>Copy meeting link</TooltipContent>
-        </Tooltip>
+        </Tooltip> */}
       </div>
 
-      {(!isConnected || !isProducing) && status && (
+      {/* {(!isConnected || !isProducing) && status && (
         <div className="mt-2 text-center">
           <p className="text-sm text-white">{status}</p>
         </div>
-      )}
+      )} */}
     </div>
   );
 }
