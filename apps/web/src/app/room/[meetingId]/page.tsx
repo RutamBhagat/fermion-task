@@ -8,8 +8,12 @@ import { useWebRTC } from "@/hooks/use-webrtc";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Mic, MicOff, Video, VideoOff, Phone } from "lucide-react";
+import { VideoGrid } from "@/components/video-grid";
+import { ControlBar } from "@/components/control-bar";
+import { useRouter } from "next/navigation"; // Need this for leaving
 
 export default function RoomPage() {
+  const router = useRouter();
   const params = useParams();
   const meetingId = params.meetingId as string;
 
@@ -27,8 +31,8 @@ export default function RoomPage() {
     toggleVideo,
   } = useMediaDevices();
   const {
-    remoteParticipants,
     isProducing,
+    remoteParticipants,
     initializeDevice,
     createConsumerTransport,
     createConsumer,
@@ -42,6 +46,11 @@ export default function RoomPage() {
     if (socket && localStream) {
       createProducerTransportAndStartProducing(socket, localStream);
     }
+  };
+
+  const handleLeaveCall = () => {
+    cleanup();
+    router.push("/");
   };
 
   useEffect(() => {
@@ -87,84 +96,27 @@ export default function RoomPage() {
   ]);
 
   return (
-    <div className="flex h-screen w-screen flex-col items-center justify-center bg-gray-900 p-4 text-white">
-      <div className="grid flex-grow grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {/* Local Video */}
-        <Card className="overflow-hidden bg-gray-800">
-          <CardContent className="relative h-full p-0">
-            <video
-              ref={(element) => {
-                if (element && localStream) {
-                  element.srcObject = localStream;
-                }
-              }}
-              autoPlay
-              muted
-              playsInline
-              className="h-full w-full object-cover"
-            />
-            <div className="absolute bottom-2 left-2 rounded-md bg-black/50 px-2 py-1 text-sm">
-              You
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Remote Videos */}
-        {remoteParticipants.map((p) => (
-          <Card key={p.socketId} className="overflow-hidden bg-gray-800">
-            <CardContent className="relative h-full p-0">
-              <video
-                ref={(el) => el && p.stream && (el.srcObject = p.stream)}
-                autoPlay
-                playsInline
-                className="h-full w-full object-cover"
-              />
-              <div className="absolute bottom-2 left-2 rounded-md bg-black/50 px-2 py-1 text-sm">
-                {p.socketId.slice(0, 6)}
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-
-      {/* Control Bar */}
-      <div className="mt-4 flex items-center justify-center gap-4 rounded-lg bg-gray-800 p-4">
-        <Button
-          onClick={toggleMute}
-          variant={isMuted ? "destructive" : "secondary"}
-          size="lg"
-          className="rounded-full"
-        >
-          {isMuted ? <MicOff /> : <Mic />}
-        </Button>
-        <Button
-          onClick={toggleVideo}
-          variant={isVideoOff ? "destructive" : "secondary"}
-          size="lg"
-          className="rounded-full"
-        >
-          {isVideoOff ? <VideoOff /> : <Video />}
-        </Button>
-
-        {!isProducing ? (
-          <Button
-            onClick={handleJoinCall}
-            size="lg"
-            className="rounded-full bg-green-600 px-6 hover:bg-green-700"
-          >
-            Join Call
-          </Button>
-        ) : (
-          <Button
-            variant="destructive"
-            size="lg"
-            className="rounded-full"
-            // We'll add a leave call handler later
-          >
-            <Phone className="rotate-[135deg]" />
-          </Button>
-        )}
-      </div>
+    <div className="relative h-screen w-screen overflow-hidden bg-black text-white">
+      <VideoGrid
+        localStream={localStream}
+        remoteParticipants={remoteParticipants}
+        isMuted={isMuted}
+        isVideoOff={isVideoOff}
+      />
+      <ControlBar
+        isProducing={isProducing}
+        isMuted={isMuted}
+        isVideoOff={isVideoOff}
+        onToggleMute={toggleMute}
+        onToggleVideo={toggleVideo}
+        onJoinCall={handleJoinCall}
+        onLeaveCall={handleLeaveCall}
+        // The component will currently not work, We'll add HLS props later
+        isHlsStreaming={false}
+        isStartingHls={false}
+        onStartHls={() => {}}
+        onStopHls={() => {}}
+      />
     </div>
   );
 }
