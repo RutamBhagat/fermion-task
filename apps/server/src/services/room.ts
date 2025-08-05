@@ -26,3 +26,31 @@ export async function createRoom(roomId: string): Promise<RoomState> {
   console.log(`Room created: ${roomId}`);
   return roomState;
 }
+
+export function getRoomState(roomId: string): RoomState | null {
+  return rooms.get(roomId) || null;
+}
+
+export function joinRoom(roomId: string, socketId: string): RoomState {
+  const roomState = rooms.get(roomId);
+  if (!roomState) {
+    throw new Error(`Room ${roomId} does not exist`);
+  }
+  roomState.participants.add(socketId);
+  console.log(`Socket ${socketId} joined room ${roomId}`);
+  return roomState;
+}
+
+export function leaveRoom(roomId: string, socketId: string): void {
+  const roomState = rooms.get(roomId);
+  if (!roomState) return;
+
+  roomState.participants.delete(socketId);
+  console.log(`Socket ${socketId} left room ${roomId}`);
+
+  if (roomState.participants.size === 0) {
+    roomState.router.close();
+    rooms.delete(roomId);
+    console.log(`Room ${roomId} deleted because it is empty.`);
+  }
+}
