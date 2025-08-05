@@ -1,18 +1,24 @@
 import { webRtcTransportOptions } from "@/config/mediasoup";
-import { getLegacyRouter } from "@/services/mediasoup";
+import { getLegacyRouter } from "@/services/mediasoup"; // still need this for HLS fallback
 import type { SocketTransports } from "@/types";
 import type { Consumer, Producer } from "mediasoup/types";
 import type { Server, Socket } from "socket.io";
-import { createRoom, getRoomState, joinRoom, leaveRoom } from "@/services/room";
+import {
+  getAllRooms,
+  createRoom,
+  getRoomState,
+  joinRoom,
+  leaveRoom,
+} from "@/services/room";
 
-// These would be removed later when the new room management is fully implemented
+// Keep legacy maps for the HLS stream creation, which might not be tied to a room initially
 const legacyTransports = new Map<string, SocketTransports>();
 const legacyProducers = new Map<string, Producer[]>();
 const legacyConsumers = new Map<string, Consumer>();
 
 export function setupSocketHandlers(io: Server) {
   io.on("connection", (socket: Socket) => {
-    console.log(`A client connected in the new handler: ${socket.id}`);
+    console.log(`Client connected: ${socket.id}`);
     let currentRoomId: string | null = null;
 
     socket.on("joinRoom", async (data: { roomId: string }) => {
@@ -34,25 +40,24 @@ export function setupSocketHandlers(io: Server) {
       if (roomId) {
         leaveRoom(roomId, socket.id);
         currentRoomId = null;
+        const roomState = getRoomState(roomId);
+        if (roomState) {
+          // Not really needed it shows room participant count for all rooms
+          io.emit("roomParticipantCount", {
+            roomId,
+            count: roomState.participants.size,
+          });
+        }
       }
     });
 
     socket.on("getRtpCapabilities", (data: { roomId: string }, callback) => {
       try {
         const { roomId } = data;
-        let targetRouter;
-
-        if (roomId) {
-          const roomState = getRoomState(roomId);
-          if (!roomState) return callback({ error: "Room not found" });
-          targetRouter = roomState.router;
-        } else {
-          targetRouter = getLegacyRouter();
-        }
-
+        const roomState = roomId ? getRoomState(roomId) : null;
+        const targetRouter = roomState ? roomState.router : getLegacyRouter();
         callback({ rtpCapabilities: targetRouter.rtpCapabilities });
       } catch (error) {
-        console.error("Error getting RTP capabilities:", error);
         callback({
           error: error instanceof Error ? error.message : "Unknown error",
         });
@@ -61,39 +66,26 @@ export function setupSocketHandlers(io: Server) {
 
     socket.on(
       "createWebRtcTransport",
-      async (data: { type: string; roomId: string }, callback) => {
+      async (data: { roomId: string; type: string }, callback) => {
         try {
           const { roomId, type } = data;
-          let targetRouter;
-          let targetTransports;
-
-          if (roomId) {
-            const roomState = getRoomState(roomId);
-            if (!roomState) return callback({ error: "Room not found" });
-            targetRouter = roomState.router;
-            targetTransports = roomState.transports;
-          } else {
-            targetRouter = getLegacyRouter();
-            targetTransports = legacyTransports;
-          }
+          const roomState = roomId ? getRoomState(roomId) : null;
+          const targetRouter = roomState ? roomState.router : getLegacyRouter();
+          const targetTransports = roomState
+            ? roomState.transports
+            : legacyTransports;
 
           const transport = await targetRouter.createWebRtcTransport(
             webRtcTransportOptions
           );
-
           if (!targetTransports.has(socket.id)) {
             targetTransports.set(socket.id, {});
           }
-
-          const transportType = type || "producer";
-          const socketTransports = targetTransports.get(socket.id);
-
-          if (socketTransports) {
-            if (transportType === "producer") {
-              socketTransports.producer = transport;
-            } else {
-              socketTransports.consumer = transport;
-            }
+          const socketTransports = targetTransports.get(socket.id)!;
+          if (type === "consumer") {
+            socketTransports.consumer = transport;
+          } else {
+            socketTransports.producer = transport;
           }
 
           callback({
@@ -105,7 +97,6 @@ export function setupSocketHandlers(io: Server) {
             },
           });
         } catch (error) {
-          console.error("Error creating WebRTC transport:", error);
           callback({
             error: error instanceof Error ? error.message : "Unknown error",
           });
@@ -113,189 +104,198 @@ export function setupSocketHandlers(io: Server) {
       }
     );
 
-    socket.on("connectTransport", async (data, callback) => {
-      try {
-        const { transportId, dtlsParameters } = data;
-        const transportsForSocket = legacyTransports.get(socket.id);
+    socket.on(
+      "connectTransport",
+      async (
+        data: { roomId: string; transportId: string; dtlsParameters: any },
+        callback
+      ) => {
+        try {
+          const { roomId, transportId, dtlsParameters } = data;
+          const roomState = roomId ? getRoomState(roomId) : null;
+          const targetTransports = roomState
+            ? roomState.transports
+            : legacyTransports;
+          const transportsForSocket = targetTransports.get(socket.id);
+          if (!transportsForSocket) throw new Error("No transports found");
 
-        if (!transportsForSocket) {
-          throw new Error("No transports found for socket");
+          const transport = Object.values(transportsForSocket).find(
+            (t) => t?.id === transportId
+          );
+          if (!transport) throw new Error("Transport not found");
+
+          await transport.connect({ dtlsParameters });
+          callback();
+        } catch (error) {
+          callback({
+            error: error instanceof Error ? error.message : "Unknown error",
+          });
         }
-
-        // Find the transport (could be producer or consumer)
-        const transport = Object.values(transportsForSocket).find(
-          (t) => t && t.id === transportId
-        );
-
-        if (!transport) {
-          throw new Error("Transport not found");
-        }
-
-        await transport.connect({ dtlsParameters });
-        callback();
-      } catch (error) {
-        console.error("Error connecting transport:", error);
-        callback({
-          error: error instanceof Error ? error.message : "Unknown error",
-        });
       }
-    });
+    );
 
-    socket.on("produce", async (data, callback) => {
-      try {
-        const { kind, rtpParameters } = data;
-        const transportsForSocket = legacyTransports.get(socket.id);
-        const transport = transportsForSocket?.producer;
+    socket.on(
+      "produce",
+      async (
+        data: { roomId: string; kind: any; rtpParameters: any },
+        callback
+      ) => {
+        try {
+          const { roomId, kind, rtpParameters } = data;
+          const roomState = roomId ? getRoomState(roomId) : null;
+          const targetTransports = roomState
+            ? roomState.transports
+            : legacyTransports;
+          const targetProducers = roomState
+            ? roomState.producers
+            : legacyProducers;
 
-        if (!transport) {
-          throw new Error("Producer transport not found");
-        }
+          const transport = targetTransports.get(socket.id)?.producer;
+          if (!transport) throw new Error("Producer transport not found");
 
-        const producer = await transport.produce({
-          kind,
-          rtpParameters,
-        });
+          const producer = await transport.produce({ kind, rtpParameters });
+          if (!targetProducers.has(socket.id)) {
+            targetProducers.set(socket.id, []);
+          }
+          targetProducers.get(socket.id)!.push(producer);
 
-        if (!legacyProducers.has(socket.id)) {
-          legacyProducers.set(socket.id, []);
-        }
-        const producerList = legacyProducers.get(socket.id);
-        if (producerList) {
-          producerList.push(producer);
-        }
-
-        // Let other clients know a new producer is available
-        socket.broadcast.emit("newProducer", {
-          producerId: producer.id,
-          socketId: socket.id,
-        });
-
-        callback({ id: producer.id });
-      } catch (error) {
-        console.error("Error producing:", error);
-        callback({
-          error: error instanceof Error ? error.message : "Unknown error",
-        });
-      }
-    });
-
-    socket.on("consume", async (data, callback) => {
-      try {
-        const { producerSocketId, rtpCapabilities } = data;
-        const router = getLegacyRouter();
-        const transportsForSocket = legacyTransports.get(socket.id);
-        const transport = transportsForSocket?.consumer;
-
-        if (!transport) {
-          callback({ error: "Consumer transport not found" });
-          return;
-        }
-
-        const producerList = legacyProducers.get(producerSocketId);
-
-        if (!producerList || producerList.length === 0) {
-          callback({ error: "No producers found for socket" });
-          return;
-        }
-
-        const consumableProducers = producerList.filter((p: Producer) =>
-          router.canConsume({
-            producerId: p.id,
-            rtpCapabilities,
-          })
-        );
-
-        if (consumableProducers.length === 0) {
-          callback({ error: "No consumable producers found" });
-          return;
-        }
-
-        const consumerParamsArray = [];
-
-        for (const producer of consumableProducers) {
-          const consumer = await transport.consume({
-            producerId: producer.id,
-            rtpCapabilities,
-            paused: true,
-            appData: {
+          if (roomId) {
+            socket.to(roomId).emit("newProducer", {
+              producerId: producer.id,
               socketId: socket.id,
-              producerSocketId,
-            },
-          });
+            });
+          } else {
+            socket.broadcast.emit("newProducer", {
+              producerId: producer.id,
+              socketId: socket.id,
+            });
+          }
 
-          legacyConsumers.set(consumer.id, consumer);
-
-          consumerParamsArray.push({
-            id: consumer.id,
-            producerId: producer.id,
-            kind: consumer.kind,
-            rtpParameters: consumer.rtpParameters,
+          callback({ id: producer.id });
+        } catch (error) {
+          callback({
+            error: error instanceof Error ? error.message : "Unknown error",
           });
         }
-
-        callback({ params: consumerParamsArray });
-      } catch (error) {
-        console.error("Error consuming:", error);
-        callback({
-          error: error instanceof Error ? error.message : "Unknown error",
-        });
       }
-    });
+    );
 
-    socket.on("resume", async (data, callback) => {
-      try {
-        const { consumerId } = data;
-        const consumer = legacyConsumers.get(consumerId);
+    socket.on(
+      "consume",
+      async (
+        data: {
+          roomId: string;
+          producerSocketId: string;
+          rtpCapabilities: any;
+        },
+        callback
+      ) => {
+        try {
+          const { roomId, producerSocketId, rtpCapabilities } = data;
+          const roomState = roomId ? getRoomState(roomId) : null;
+          const targetRouter = roomState ? roomState.router : getLegacyRouter();
+          const targetTransports = roomState
+            ? roomState.transports
+            : legacyTransports;
+          const targetProducers = roomState
+            ? roomState.producers
+            : legacyProducers;
+          const targetConsumers = roomState
+            ? roomState.consumers
+            : legacyConsumers;
 
-        if (!consumer) {
-          throw new Error(`Consumer not found: ${consumerId}`);
+          const transport = targetTransports.get(socket.id)?.consumer;
+          if (!transport) throw new Error("Consumer transport not found");
+
+          const producerList = targetProducers.get(producerSocketId);
+          if (!producerList) throw new Error("Producers not found for socket");
+
+          const consumersData = [];
+          for (const producer of producerList) {
+            if (
+              targetRouter.canConsume({
+                producerId: producer.id,
+                rtpCapabilities,
+              })
+            ) {
+              const consumer = await transport.consume({
+                producerId: producer.id,
+                rtpCapabilities,
+                paused: true,
+                appData: { socketId: socket.id, producerSocketId, roomId },
+              });
+              targetConsumers.set(consumer.id, consumer);
+              consumersData.push({
+                id: consumer.id,
+                producerId: producer.id,
+                kind: consumer.kind,
+                rtpParameters: consumer.rtpParameters,
+              });
+            }
+          }
+          callback({ params: consumersData });
+        } catch (error) {
+          callback({
+            error: error instanceof Error ? error.message : "Unknown error",
+          });
         }
+      }
+    );
 
-        if (consumer.paused) {
+    socket.on(
+      "resume",
+      async (data: { roomId: string; consumerId: string }, callback) => {
+        try {
+          const { roomId, consumerId } = data;
+          let consumer: Consumer | undefined;
+          if (roomId) {
+            const roomState = getRoomState(roomId);
+            consumer = roomState?.consumers.get(consumerId);
+          } else {
+            for (const room of getAllRooms().values()) {
+              if (room.consumers.has(consumerId)) {
+                consumer = room.consumers.get(consumerId);
+                break;
+              }
+            }
+            if (!consumer) consumer = legacyConsumers.get(consumerId);
+          }
+
+          if (!consumer) throw new Error("Consumer not found");
+
           await consumer.resume();
-          console.log(`Consumer resumed: ${consumerId}`);
+          callback();
+        } catch (error) {
+          callback({
+            error: error instanceof Error ? error.message : "Unknown error",
+          });
         }
-
-        callback();
-      } catch (error) {
-        console.error("Error resuming consumer:", error);
-        callback({
-          error: error instanceof Error ? error.message : "Unknown error",
-        });
       }
+    );
+
+    socket.on("getProducers", (data: { roomId: string }, callback) => {
+      const { roomId } = data;
+      const roomState = roomId ? getRoomState(roomId) : null;
+      const targetProducers = roomState ? roomState.producers : legacyProducers;
+
+      const producerList: { producerId: string; socketId: string }[] = [];
+      targetProducers.forEach((producers, socketId) => {
+        if (socketId !== socket.id) {
+          producers.forEach((p) =>
+            producerList.push({ producerId: p.id, socketId })
+          );
+        }
+      });
+      callback(producerList);
     });
 
     socket.on("disconnect", () => {
       console.log(`Client disconnected: ${socket.id}`);
-
       if (currentRoomId) {
         leaveRoom(currentRoomId, socket.id);
       }
-
-      const transportsForSocket = legacyTransports.get(socket.id);
-      const producerList = legacyProducers.get(socket.id);
-
-      if (transportsForSocket) {
-        if (transportsForSocket.producer) transportsForSocket.producer.close();
-        if (transportsForSocket.consumer) transportsForSocket.consumer.close();
-      }
-
-      if (producerList) {
-        producerList.forEach((producer) => producer.close());
-      }
-
-      for (const [consumerId, consumer] of legacyConsumers) {
-        if (consumer.appData?.socketId === socket.id) {
-          consumer.close();
-          legacyConsumers.delete(consumerId);
-        }
-      }
-
       legacyTransports.delete(socket.id);
       legacyProducers.delete(socket.id);
-
-      // Let other clients know this producer has left
-      socket.broadcast.emit("producerClosed", { socketId: socket.id });
     });
   });
 }

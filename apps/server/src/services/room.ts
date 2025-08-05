@@ -27,6 +27,10 @@ export async function createRoom(roomId: string): Promise<RoomState> {
   return roomState;
 }
 
+export function getAllRooms() {
+  return rooms;
+}
+
 export function getRoomState(roomId: string): RoomState | null {
   return rooms.get(roomId) || null;
 }
