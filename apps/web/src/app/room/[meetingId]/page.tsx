@@ -1,13 +1,12 @@
 "use client";
 
-import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
+import { useRouter, useParams } from "next/navigation";
 import { useMediaDevices } from "@/hooks/use-media-devices";
 import { useSocket } from "@/hooks/use-socket";
 import { useRoom } from "@/hooks/use-room";
 import { VideoGrid } from "@/components/video-grid";
 import { ControlBar } from "@/components/control-bar";
-import { useRouter } from "next/navigation"; // Need this for leaving
 
 export default function RoomPage() {
   const router = useRouter();
@@ -70,7 +69,9 @@ export default function RoomPage() {
 
     initialize();
 
-    socket.on("newProducer", ({socketId}) => createConsumer(socket, socketId));
+    socket.on("newProducer", ({ socketId }) =>
+      createConsumer(socket, socketId)
+    );
     socket.on("producerClosed", handleProducerClosed);
 
     return () => {
@@ -78,13 +79,7 @@ export default function RoomPage() {
       socket.off("producerClosed");
       cleanup();
     };
-  }, [
-    socket,
-    isConnected,
-    getMedia,
-    handleProducerClosed,
-    cleanup,
-  ]);
+  }, [socket, isConnected, getMedia, handleProducerClosed, cleanup]);
 
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-black text-white">
