@@ -1,62 +1,38 @@
 import { webRtcTransportOptions } from "@/config/mediasoup";
-import { getLegacyRouter } from "@/services/mediasoup"; // still need this for HLS fallback
-import type { SocketTransports } from "@/types";
-import type { Consumer, Producer } from "mediasoup/types";
 import type { Server, Socket } from "socket.io";
-import {
-  getAllRooms,
-  createRoom,
-  getRoomState,
-  joinRoom,
-  leaveRoom,
-} from "@/services/room";
-
-// Keep legacy maps for the HLS stream creation, which might not be tied to a room initially
-const legacyTransports = new Map<string, SocketTransports>();
-const legacyProducers = new Map<string, Producer[]>();
-const legacyConsumers = new Map<string, Consumer>();
+import { createRoom, getRoomState, joinRoom, leaveRoom } from "@/services/room";
 
 export function setupSocketHandlers(io: Server) {
   io.on("connection", (socket: Socket) => {
     console.log(`Client connected: ${socket.id}`);
     let currentRoomId: string | null = null;
 
-    socket.on("joinRoom", async (data: { roomId: string }) => {
+    const cleanup = () => {
+      if (currentRoomId) {
+        leaveRoom(currentRoomId, socket.id);
+        io.to(currentRoomId).emit("producerClosed", { socketId: socket.id });
+        currentRoomId = null;
+      }
+    };
+
+    socket.on("joinRoom", async ({ roomId }, callback) => {
       try {
-        const { roomId } = data;
+        await createRoom(roomId);
+        await socket.join(roomId);
+        joinRoom(roomId, socket.id);
         currentRoomId = roomId;
 
-        await createRoom(roomId);
-        joinRoom(roomId, socket.id);
-
-        console.log(`Socket ${socket.id} joined room ${roomId}`);
-      } catch (error) {
-        console.error("Error joining room:", error);
-      }
-    });
-
-    socket.on("leaveRoom", (data) => {
-      const { roomId } = data;
-      if (roomId) {
-        leaveRoom(roomId, socket.id);
-        currentRoomId = null;
-        const roomState = getRoomState(roomId);
-        if (roomState) {
-          // Not really needed it shows room participant count for all rooms
-          io.emit("roomParticipantCount", {
-            roomId,
-            count: roomState.participants.size,
-          });
+        const roomState = getRoomState(roomId)!;
+        const producerList: { producerId: string; socketId: string }[] = [];
+        for (const [socketId, producers] of roomState.producers.entries()) {
+          if (socketId !== socket.id) {
+            producers.forEach((p) =>
+              producerList.push({ producerId: p.id, socketId })
+            );
+          }
         }
-      }
-    });
 
-    socket.on("getRtpCapabilities", (data: { roomId: string }, callback) => {
-      try {
-        const { roomId } = data;
-        const roomState = roomId ? getRoomState(roomId) : null;
-        const targetRouter = roomState ? roomState.router : getLegacyRouter();
-        callback({ rtpCapabilities: targetRouter.rtpCapabilities });
+        callback({ producers: producerList });
       } catch (error) {
         callback({
           error: error instanceof Error ? error.message : "Unknown error",
@@ -64,238 +40,115 @@ export function setupSocketHandlers(io: Server) {
       }
     });
 
-    socket.on(
-      "createWebRtcTransport",
-      async (data: { roomId: string; type: string }, callback) => {
-        try {
-          const { roomId, type } = data;
-          const roomState = roomId ? getRoomState(roomId) : null;
-          const targetRouter = roomState ? roomState.router : getLegacyRouter();
-          const targetTransports = roomState
-            ? roomState.transports
-            : legacyTransports;
+    socket.on("leaveRoom", cleanup);
 
-          const transport = await targetRouter.createWebRtcTransport(
-            webRtcTransportOptions
-          );
-          if (!targetTransports.has(socket.id)) {
-            targetTransports.set(socket.id, {});
-          }
-          const socketTransports = targetTransports.get(socket.id)!;
-          if (type === "consumer") {
-            socketTransports.consumer = transport;
-          } else {
-            socketTransports.producer = transport;
-          }
+    socket.on("getRtpCapabilities", ({ roomId }, callback) => {
+      const roomState = getRoomState(roomId);
+      if (!roomState) return callback({ error: "Room not found" });
+      callback({ rtpCapabilities: roomState.router.rtpCapabilities });
+    });
 
-          callback({
-            params: {
-              id: transport.id,
-              iceParameters: transport.iceParameters,
-              iceCandidates: transport.iceCandidates,
-              dtlsParameters: transport.dtlsParameters,
-            },
-          });
-        } catch (error) {
-          callback({
-            error: error instanceof Error ? error.message : "Unknown error",
-          });
-        }
+    socket.on("createWebRtcTransport", async ({ roomId, type }, callback) => {
+      const roomState = getRoomState(roomId);
+      if (!roomState) return callback({ error: "Room not found" });
+
+      const transport = await roomState.router.createWebRtcTransport(
+        webRtcTransportOptions
+      );
+      if (!roomState.transports.has(socket.id)) {
+        roomState.transports.set(socket.id, {});
       }
-    );
+      const socketTransports = roomState.transports.get(socket.id)!;
+      const transportType = type === "consumer" ? "consumer" : "producer";
+      socketTransports[transportType] = transport;
+
+      callback({
+        params: {
+          id: transport.id,
+          iceParameters: transport.iceParameters,
+          iceCandidates: transport.iceCandidates,
+          dtlsParameters: transport.dtlsParameters,
+        },
+      });
+    });
 
     socket.on(
       "connectTransport",
-      async (
-        data: { roomId: string; transportId: string; dtlsParameters: any },
-        callback
-      ) => {
-        try {
-          const { roomId, transportId, dtlsParameters } = data;
-          const roomState = roomId ? getRoomState(roomId) : null;
-          const targetTransports = roomState
-            ? roomState.transports
-            : legacyTransports;
-          const transportsForSocket = targetTransports.get(socket.id);
-          if (!transportsForSocket) throw new Error("No transports found");
+      async ({ roomId, transportId, dtlsParameters }, callback) => {
+        const roomState = getRoomState(roomId);
+        const userTransports = roomState?.transports.get(socket.id);
+        const transportType =
+          transportId === userTransports?.producer?.id
+            ? "producer"
+            : "consumer";
+        const transport = userTransports?.[transportType];
+        if (!transport) return callback({ error: "Transport not found" });
 
-          const transport = Object.values(transportsForSocket).find(
-            (t) => t?.id === transportId
-          );
-          if (!transport) throw new Error("Transport not found");
-
-          await transport.connect({ dtlsParameters });
-          callback();
-        } catch (error) {
-          callback({
-            error: error instanceof Error ? error.message : "Unknown error",
-          });
-        }
+        await transport.connect({ dtlsParameters });
+        callback();
       }
     );
 
-    socket.on(
-      "produce",
-      async (
-        data: { roomId: string; kind: any; rtpParameters: any },
-        callback
-      ) => {
-        try {
-          const { roomId, kind, rtpParameters } = data;
-          const roomState = roomId ? getRoomState(roomId) : null;
-          const targetTransports = roomState
-            ? roomState.transports
-            : legacyTransports;
-          const targetProducers = roomState
-            ? roomState.producers
-            : legacyProducers;
-
-          const transport = targetTransports.get(socket.id)?.producer;
-          if (!transport) throw new Error("Producer transport not found");
-
-          const producer = await transport.produce({ kind, rtpParameters });
-          if (!targetProducers.has(socket.id)) {
-            targetProducers.set(socket.id, []);
-          }
-          targetProducers.get(socket.id)!.push(producer);
-
-          if (roomId) {
-            socket.to(roomId).emit("newProducer", {
-              producerId: producer.id,
-              socketId: socket.id,
-            });
-          } else {
-            socket.broadcast.emit("newProducer", {
-              producerId: producer.id,
-              socketId: socket.id,
-            });
-          }
-
-          callback({ id: producer.id });
-        } catch (error) {
-          callback({
-            error: error instanceof Error ? error.message : "Unknown error",
-          });
-        }
+    socket.on("produce", async ({ roomId, kind, rtpParameters }, callback) => {
+      const roomState = getRoomState(roomId);
+      const transport = roomState?.transports.get(socket.id)?.producer;
+      if (!transport)
+        return callback({ error: "Producer transport not found" });
+      const producer = await transport.produce({ kind, rtpParameters });
+      if (!roomState.producers.has(socket.id)) {
+        roomState.producers.set(socket.id, []);
       }
-    );
+      roomState.producers.get(socket.id)!.push(producer);
+
+      socket
+        .to(roomId)
+        .emit("newProducer", { producerId: producer.id, socketId: socket.id });
+      callback({ id: producer.id });
+    });
 
     socket.on(
       "consume",
-      async (
-        data: {
-          roomId: string;
-          producerSocketId: string;
-          rtpCapabilities: any;
-        },
-        callback
-      ) => {
-        try {
-          const { roomId, producerSocketId, rtpCapabilities } = data;
-          const roomState = roomId ? getRoomState(roomId) : null;
-          const targetRouter = roomState ? roomState.router : getLegacyRouter();
-          const targetTransports = roomState
-            ? roomState.transports
-            : legacyTransports;
-          const targetProducers = roomState
-            ? roomState.producers
-            : legacyProducers;
-          const targetConsumers = roomState
-            ? roomState.consumers
-            : legacyConsumers;
+      async ({ roomId, producerSocketId, rtpCapabilities }, callback) => {
+        const roomState = getRoomState(roomId);
+        const router = roomState?.router;
+        const transport = roomState?.transports.get(socket.id)?.consumer;
+        if (!router || !transport)
+          return callback({ error: "room or transport error" });
 
-          const transport = targetTransports.get(socket.id)?.consumer;
-          if (!transport) throw new Error("Consumer transport not found");
+        const producers = roomState.producers.get(producerSocketId);
+        if (!producers) return callback({ error: "producer not found" });
 
-          const producerList = targetProducers.get(producerSocketId);
-          if (!producerList) throw new Error("Producers not found for socket");
-
-          const consumersData = [];
-          for (const producer of producerList) {
-            if (
-              targetRouter.canConsume({
-                producerId: producer.id,
-                rtpCapabilities,
-              })
-            ) {
-              const consumer = await transport.consume({
-                producerId: producer.id,
-                rtpCapabilities,
-                paused: true,
-                appData: { socketId: socket.id, producerSocketId, roomId },
-              });
-              targetConsumers.set(consumer.id, consumer);
-              consumersData.push({
-                id: consumer.id,
-                producerId: producer.id,
-                kind: consumer.kind,
-                rtpParameters: consumer.rtpParameters,
-              });
-            }
+        const consumersData = [];
+        for (const producer of producers) {
+          if (router.canConsume({ producerId: producer.id, rtpCapabilities })) {
+            const consumer = await transport.consume({
+              producerId: producer.id,
+              rtpCapabilities,
+              paused: true,
+              appData: { socketId: socket.id, producerSocketId, roomId },
+            });
+            roomState.consumers.set(consumer.id, consumer);
+            consumersData.push({
+              id: consumer.id,
+              producerId: producer.id,
+              kind: consumer.kind,
+              rtpParameters: consumer.rtpParameters,
+            });
           }
-          callback({ params: consumersData });
-        } catch (error) {
-          callback({
-            error: error instanceof Error ? error.message : "Unknown error",
-          });
         }
+        callback({ params: consumersData });
       }
     );
 
-    socket.on(
-      "resume",
-      async (data: { roomId: string; consumerId: string }, callback) => {
-        try {
-          const { roomId, consumerId } = data;
-          let consumer: Consumer | undefined;
-          if (roomId) {
-            const roomState = getRoomState(roomId);
-            consumer = roomState?.consumers.get(consumerId);
-          } else {
-            for (const room of getAllRooms().values()) {
-              if (room.consumers.has(consumerId)) {
-                consumer = room.consumers.get(consumerId);
-                break;
-              }
-            }
-            if (!consumer) consumer = legacyConsumers.get(consumerId);
-          }
+    socket.on("resume", async ({ roomId, consumerId }, callback) => {
+      const roomState = getRoomState(roomId);
+      const consumer = roomState?.consumers.get(consumerId);
+      if (!consumer) return callback({ error: "Consumer not found" });
 
-          if (!consumer) throw new Error("Consumer not found");
-
-          await consumer.resume();
-          callback();
-        } catch (error) {
-          callback({
-            error: error instanceof Error ? error.message : "Unknown error",
-          });
-        }
-      }
-    );
-
-    socket.on("getProducers", (data: { roomId: string }, callback) => {
-      const { roomId } = data;
-      const roomState = roomId ? getRoomState(roomId) : null;
-      const targetProducers = roomState ? roomState.producers : legacyProducers;
-
-      const producerList: { producerId: string; socketId: string }[] = [];
-      targetProducers.forEach((producers, socketId) => {
-        if (socketId !== socket.id) {
-          producers.forEach((p) =>
-            producerList.push({ producerId: p.id, socketId })
-          );
-        }
-      });
-      callback(producerList);
+      await consumer.resume();
+      callback();
     });
 
-    socket.on("disconnect", () => {
-      console.log(`Client disconnected: ${socket.id}`);
-      if (currentRoomId) {
-        leaveRoom(currentRoomId, socket.id);
-      }
-      legacyTransports.delete(socket.id);
-      legacyProducers.delete(socket.id);
-    });
+    socket.on("disconnect", cleanup);
   });
 }
