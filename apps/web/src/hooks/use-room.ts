@@ -147,13 +147,6 @@ export function useRoom(roomId: string) {
     setIsProducing(true);
   };
 
-  const handleNewProducer = useCallback(
-    async (socket: Socket, { socketId }: { socketId: string }) => {
-      await createConsumer(socket, socketId);
-    },
-    [createConsumer]
-  );
-
   const handleProducerClosed = useCallback(
     ({ socketId }: { socketId: string }) => {
       consumersRef.current = consumersRef.current.filter((c) => {
@@ -191,8 +184,8 @@ export function useRoom(roomId: string) {
     isProducing,
     remoteParticipants,
     joinRoom,
+    createConsumer,
     createProducerTransportAndStartProducing,
-    handleNewProducer,
     handleProducerClosed,
     cleanup,
   };

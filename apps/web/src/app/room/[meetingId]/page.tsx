@@ -4,7 +4,7 @@ import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useMediaDevices } from "@/hooks/use-media-devices";
 import { useSocket } from "@/hooks/use-socket";
-import { useWebRTC } from "@/hooks/use-webrtc";
+import { useRoom } from "@/hooks/use-room";
 import { VideoGrid } from "@/components/video-grid";
 import { ControlBar } from "@/components/control-bar";
 import { useRouter } from "next/navigation"; // Need this for leaving
@@ -21,27 +21,30 @@ export default function RoomPage() {
   });
   const {
     localStream,
-    getMedia,
     isMuted,
     isVideoOff,
+    getMedia,
     toggleMute,
     toggleVideo,
   } = useMediaDevices();
   const {
     isProducing,
     remoteParticipants,
-    initializeDevice,
-    createConsumerTransport,
+    joinRoom,
     createConsumer,
     createProducerTransportAndStartProducing,
-    handleNewProducer,
     handleProducerClosed,
     cleanup,
-  } = useWebRTC();
+  } = useRoom(meetingId);
 
   const handleJoinCall = () => {
     if (socket && localStream) {
-      createProducerTransportAndStartProducing(socket, localStream);
+      setStatus("Joining call...");
+      createProducerTransportAndStartProducing(socket, localStream).then(() => {
+        setStatus("Live in call!");
+      });
+    } else {
+      alert("Could not get local media, please check permissions.");
     }
   };
 
@@ -54,26 +57,20 @@ export default function RoomPage() {
     if (!socket || !isConnected) return;
 
     const initialize = async () => {
-      setStatus("Getting media...");
       const stream = await getMedia();
       if (!stream) {
         setStatus("Could not get media. Please check permissions.");
         return;
       }
 
-      setStatus("Initializing device...");
-      await initializeDevice(socket);
-
-      setStatus("Creating consumer transport...");
-      await createConsumerTransport(socket);
-
-      console.log("Ready to join!");
-      setStatus("Ready to join!");
+      setStatus("Joining room...");
+      await joinRoom(socket);
+      setStatus("In room, ready to join call.");
     };
 
     initialize();
 
-    socket.on("newProducer", (data) => handleNewProducer(socket, data));
+    socket.on("newProducer", ({socketId}) => createConsumer(socket, socketId));
     socket.on("producerClosed", handleProducerClosed);
 
     return () => {
@@ -85,9 +82,6 @@ export default function RoomPage() {
     socket,
     isConnected,
     getMedia,
-    initializeDevice,
-    createConsumerTransport,
-    handleNewProducer,
     handleProducerClosed,
     cleanup,
   ]);
