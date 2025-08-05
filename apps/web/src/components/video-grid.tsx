@@ -7,7 +7,7 @@ interface RemoteParticipant {
   stream: MediaStream;
 }
 
-interface VideoGridProps {
+interface Props {
   localStream: MediaStream | null;
   remoteParticipants: RemoteParticipant[];
   isMuted: boolean;
@@ -19,7 +19,7 @@ export function VideoGrid({
   remoteParticipants,
   isMuted,
   isVideoOff,
-}: VideoGridProps) {
+}: Props) {
   return (
     <div className="grid h-full w-full gap-4 p-4 grid-cols-1 md:grid-cols-2">
       <div className="relative overflow-hidden rounded-lg bg-gray-900">
@@ -70,7 +70,7 @@ export function VideoGrid({
             className="h-full w-full object-cover"
           />
           <div className="absolute bottom-2 left-2 rounded bg-black/70 px-2 py-1 font-medium text-white text-xs">
-            {participant.socketId.slice(-6)}
+            {participant.socketId}
           </div>
         </div>
       ))}
