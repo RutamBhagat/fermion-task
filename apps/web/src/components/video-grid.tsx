@@ -27,7 +27,7 @@ export function VideoGrid({
 
   return (
     <div className={cn("grid h-full w-full gap-4 p-4", gridClass)}>
-      <div className="relative overflow-hidden rounded-lg bg-gray-900">
+      <div key="local-video" className="relative overflow-hidden rounded-lg bg-gray-900">
         <video
           ref={(element) => {
             if (element && localStream) {

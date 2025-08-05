@@ -44,6 +44,43 @@ export function useRoom(roomId: string) {
     setRemoteParticipants(newParticipants);
   }, []);
 
+  const createConsumer = useCallback(
+    async (socket: Socket, producerSocketId: string) => {
+      if (!deviceRef.current || !consumerTransportRef.current) return;
+
+      try {
+        const consumeResponse = await socket.emitWithAck("consume", {
+          roomId,
+          producerSocketId,
+          rtpCapabilities: deviceRef.current.rtpCapabilities,
+        });
+
+        if ("error" in consumeResponse) {
+          console.error(`Failed to create consumer: ${consumeResponse.error}`);
+          return;
+        }
+
+        const { params } = consumeResponse;
+
+        for (const consumerParam of params) {
+          const consumer = await consumerTransportRef.current.consume({
+            ...consumerParam,
+            appData: { producerSocketId },
+          });
+          consumersRef.current.push(consumer);
+          await socket.emitWithAck("resume", {
+            roomId,
+            consumerId: consumer.id,
+          });
+        }
+        updateRemoteParticipants();
+      } catch (error) {
+        console.error("Error creating consumer:", error);
+      }
+    },
+    [roomId, updateRemoteParticipants]
+  );
+
   const joinRoom = useCallback(
     async (socket: Socket) => {
       const joinRoomResponse = await socket.emitWithAck("joinRoom", { roomId });
@@ -99,32 +136,8 @@ export function useRoom(roomId: string) {
         await createConsumer(socket, socketId);
       }
     },
-    [roomId]
+    [roomId, createConsumer]
   );
-
-  const createConsumer = async (socket: Socket, producerSocketId: string) => {
-    if (!deviceRef.current || !consumerTransportRef.current) return;
-    const consumeResponse = await socket.emitWithAck("consume", {
-      roomId,
-      producerSocketId,
-      rtpCapabilities: deviceRef.current.rtpCapabilities,
-    });
-
-    if ("error" in consumeResponse) {
-      throw new Error(`Failed to create consumer: ${consumeResponse.error}`);
-    }
-
-    const { params } = consumeResponse;
-
-    for (const consumerParam of params) {
-      const consumer = await consumerTransportRef.current.consume(
-        consumerParam
-      );
-      consumersRef.current.push(consumer);
-      await socket.emitWithAck("resume", { roomId, consumerId: consumer.id });
-    }
-    updateRemoteParticipants();
-  };
 
   const createProducerTransportAndStartProducing = async (
     socket: Socket,
