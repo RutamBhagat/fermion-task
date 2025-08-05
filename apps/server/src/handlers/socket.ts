@@ -75,35 +75,51 @@ export function setupSocketHandlers(io: Server) {
     socket.on(
       "connectTransport",
       async ({ roomId, transportId, dtlsParameters }, callback) => {
-        const roomState = getRoomState(roomId);
-        const userTransports = roomState?.transports.get(socket.id);
-        const transportType =
-          transportId === userTransports?.producer?.id
-            ? "producer"
-            : "consumer";
-        const transport = userTransports?.[transportType];
-        if (!transport) return callback({ error: "Transport not found" });
+        try {
+          const roomState = getRoomState(roomId);
+          if (!roomState) throw new Error("Room not found");
 
-        await transport.connect({ dtlsParameters });
-        callback();
+          const transports = roomState.transports.get(socket.id);
+          if (!transports) throw new Error("Transports for socket not found");
+
+          const transport =
+            transports.producer?.id === transportId
+              ? transports.producer
+              : transports.consumer;
+
+          if (!transport) throw new Error("Transport not found");
+
+          await transport.connect({ dtlsParameters });
+          callback();
+        } catch (e) {
+          callback({ error: e instanceof Error ? e.message : "Unknown error" });
+        }
       }
     );
 
     socket.on("produce", async ({ roomId, kind, rtpParameters }, callback) => {
-      const roomState = getRoomState(roomId);
-      const transport = roomState?.transports.get(socket.id)?.producer;
-      if (!transport)
-        return callback({ error: "Producer transport not found" });
-      const producer = await transport.produce({ kind, rtpParameters });
-      if (!roomState.producers.has(socket.id)) {
-        roomState.producers.set(socket.id, []);
-      }
-      roomState.producers.get(socket.id)!.push(producer);
+      try {
+        const roomState = getRoomState(roomId);
+        if (!roomState) throw new Error("Room not found");
 
-      socket
-        .to(roomId)
-        .emit("newProducer", { producerId: producer.id, socketId: socket.id });
-      callback({ id: producer.id });
+        const transport = roomState.transports.get(socket.id)?.producer;
+        if (!transport) throw new Error("Producer transport not found");
+
+        const producer = await transport.produce({ kind, rtpParameters });
+
+        if (!roomState.producers.has(socket.id)) {
+          roomState.producers.set(socket.id, []);
+        }
+        roomState.producers.get(socket.id)!.push(producer);
+
+        socket.to(roomId).emit("newProducer", {
+          producerId: producer.id,
+          socketId: socket.id,
+        });
+        callback({ id: producer.id });
+      } catch (e) {
+        callback({ error: e instanceof Error ? e.message : "Unknown error" });
+      }
     });
 
     socket.on(
