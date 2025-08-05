@@ -3,12 +3,7 @@
 import { ThemeProvider } from "./theme-provider";
 import { Toaster } from "./ui/sonner";
 
-
-export default function Providers({
-  children
-}: {
-  children: React.ReactNode
-}) {
+export default function Providers({ children }: { children: React.ReactNode }) {
   return (
     <ThemeProvider
       attribute="class"

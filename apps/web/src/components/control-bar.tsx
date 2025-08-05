@@ -17,6 +17,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
 interface ControlBarProps {
   // isConnected: boolean;
@@ -33,7 +34,6 @@ interface ControlBarProps {
   onLeaveCall: () => void;
   onStartHls: () => void;
   onStopHls: () => void;
-  // onCopyMeetingLink: () => void;
   // canJoinCall: boolean;
 }
 
@@ -46,15 +46,14 @@ export function ControlBar({
   isStartingHls,
   // showControls,
   status,
+  // canJoinCall,
   onToggleMute,
   onToggleVideo,
   onJoinCall,
   onLeaveCall,
   onStartHls,
   onStopHls,
-}: // onCopyMeetingLink,
-// canJoinCall,
-ControlBarProps) {
+}: ControlBarProps) {
   return (
     <div
       // className={cn(
@@ -192,10 +191,13 @@ ControlBarProps) {
           </TooltipContent>
         </Tooltip>
 
-        {/* <Tooltip>
+        <Tooltip>
           <TooltipTrigger asChild>
             <Button
-              onClick={onCopyMeetingLink}
+              onClick={() => {
+                navigator.clipboard.writeText(window.location.href);
+                toast.success("Meeting link copied to clipboard!");
+              }}
               size="lg"
               variant="secondary"
               className="h-12 w-12 rounded-full bg-gray-700 hover:bg-gray-600"
@@ -204,7 +206,7 @@ ControlBarProps) {
             </Button>
           </TooltipTrigger>
           <TooltipContent>Copy meeting link</TooltipContent>
-        </Tooltip> */}
+        </Tooltip>
       </div>
 
       {/* {(!isConnected || !isProducing) && status && (
