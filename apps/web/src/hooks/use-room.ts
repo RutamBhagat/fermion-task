@@ -1,12 +1,7 @@
 "use client";
 
 import { Device } from "mediasoup-client";
-import type {
-  RtpCapabilities,
-  Transport,
-  Consumer,
-  Producer,
-} from "mediasoup-client/types";
+import type { Transport, Consumer, Producer } from "mediasoup-client/types";
 import { useCallback, useRef, useState } from "react";
 import type { Socket } from "socket.io-client";
 
@@ -51,9 +46,28 @@ export function useRoom(roomId: string) {
 
   const joinRoom = useCallback(
     async (socket: Socket) => {
-      const rtpCapabilities = (await socket.emitWithAck("getRtpCapabilities", {
-        roomId,
-      })) as RtpCapabilities;
+      const joinRoomResponse = await socket.emitWithAck("joinRoom", { roomId });
+
+      if ("error" in joinRoomResponse) {
+        throw new Error(`Failed to join room: ${joinRoomResponse.error}`);
+      }
+
+      const { producers: existingProducers } = joinRoomResponse;
+
+      const rtpCapabilitiesResponse = await socket.emitWithAck(
+        "getRtpCapabilities",
+        {
+          roomId,
+        }
+      );
+
+      if ("error" in rtpCapabilitiesResponse) {
+        throw new Error(
+          `Failed to get RTP capabilities: ${rtpCapabilitiesResponse.error}`
+        );
+      }
+
+      const rtpCapabilities = rtpCapabilitiesResponse.rtpCapabilities;
       const device = new Device();
       await device.load({ routerRtpCapabilities: rtpCapabilities });
       deviceRef.current = device;
@@ -62,6 +76,13 @@ export function useRoom(roomId: string) {
         "createWebRtcTransport",
         { roomId, type: "consumer" }
       );
+
+      if ("error" in consumerTransportParams) {
+        throw new Error(
+          `Failed to create consumer transport: ${consumerTransportParams.error}`
+        );
+      }
+
       const consumerTransport = device.createRecvTransport(
         consumerTransportParams.params
       );
@@ -74,11 +95,6 @@ export function useRoom(roomId: string) {
       });
       consumerTransportRef.current = consumerTransport;
 
-      const { producers: existingProducers } = (await socket.emitWithAck(
-        "joinRoom",
-        { roomId }
-      )) as { producers: { producerId: string; socketId: string }[] };
-
       for (const { socketId } of existingProducers) {
         await createConsumer(socket, socketId);
       }
@@ -88,11 +104,17 @@ export function useRoom(roomId: string) {
 
   const createConsumer = async (socket: Socket, producerSocketId: string) => {
     if (!deviceRef.current || !consumerTransportRef.current) return;
-    const { params } = await socket.emitWithAck("consume", {
+    const consumeResponse = await socket.emitWithAck("consume", {
       roomId,
       producerSocketId,
       rtpCapabilities: deviceRef.current.rtpCapabilities,
     });
+
+    if ("error" in consumeResponse) {
+      throw new Error(`Failed to create consumer: ${consumeResponse.error}`);
+    }
+
+    const { params } = consumeResponse;
 
     for (const consumerParam of params) {
       const consumer = await consumerTransportRef.current.consume(
@@ -115,6 +137,13 @@ export function useRoom(roomId: string) {
       "createWebRtcTransport",
       { roomId, type: "producer" }
     );
+
+    if ("error" in producerTransportParams) {
+      throw new Error(
+        `Failed to create producer transport: ${producerTransportParams.error}`
+      );
+    }
+
     const transport = device.createSendTransport(
       producerTransportParams.params
     );
