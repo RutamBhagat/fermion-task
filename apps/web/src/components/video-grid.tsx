@@ -1,5 +1,7 @@
 "use client";
 
+import { useVideoGrid } from "@/hooks/use-video-grid";
+import { cn } from "@/lib/utils";
 import { MicOff, VideoOff } from "lucide-react";
 
 interface RemoteParticipant {
@@ -20,8 +22,11 @@ export function VideoGrid({
   isMuted,
   isVideoOff,
 }: Props) {
+  const participantCount = remoteParticipants.length + 1; // You + others
+  const { gridClass } = useVideoGrid(participantCount);
+
   return (
-    <div className="grid h-full w-full gap-4 p-4 grid-cols-1 md:grid-cols-2">
+    <div className={cn("grid h-full w-full gap-4 p-4", gridClass)}>
       <div className="relative overflow-hidden rounded-lg bg-gray-900">
         <video
           ref={(element) => {
