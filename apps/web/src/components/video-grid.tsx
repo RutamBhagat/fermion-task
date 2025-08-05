@@ -26,7 +26,7 @@ export function VideoGrid({
   const { gridClass } = useVideoGrid(participantCount);
 
   return (
-    <div className={cn("grid h-full w-full gap-4 p-4", gridClass)}>
+    <div className={cn("grid h-full w-full gap-1 p-1", gridClass)}>
       <div key="local-video" className="relative overflow-hidden rounded-lg bg-gray-900">
         <video
           ref={(element) => {
