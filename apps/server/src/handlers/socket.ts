@@ -3,7 +3,9 @@ import { getLegacyRouter } from "@/services/mediasoup";
 import type { SocketTransports } from "@/types";
 import type { Consumer, Producer } from "mediasoup/types";
 import type { Server, Socket } from "socket.io";
+import { createRoom, getRoomState, joinRoom, leaveRoom } from "@/services/room";
 
+// These would be removed later when the new room management is fully implemented
 const legacyTransports = new Map<string, SocketTransports>();
 const legacyProducers = new Map<string, Producer[]>();
 const legacyConsumers = new Map<string, Consumer>();
@@ -11,12 +13,44 @@ const legacyConsumers = new Map<string, Consumer>();
 export function setupSocketHandlers(io: Server) {
   io.on("connection", (socket: Socket) => {
     console.log(`A client connected in the new handler: ${socket.id}`);
+    let currentRoomId: string | null = null;
 
-    socket.on("getRtpCapabilities", (data, callback) => {
+    socket.on("joinRoom", async (data: { roomId: string }) => {
       try {
-        const router = getLegacyRouter();
-        const rtpCapabilities = router.rtpCapabilities;
-        callback({ rtpCapabilities });
+        const { roomId } = data;
+        currentRoomId = roomId;
+
+        await createRoom(roomId);
+        joinRoom(roomId, socket.id);
+
+        console.log(`Socket ${socket.id} joined room ${roomId}`);
+      } catch (error) {
+        console.error("Error joining room:", error);
+      }
+    });
+
+    socket.on("leaveRoom", (data) => {
+      const { roomId } = data;
+      if (roomId) {
+        leaveRoom(roomId, socket.id);
+        currentRoomId = null;
+      }
+    });
+
+    socket.on("getRtpCapabilities", (data: { roomId: string }, callback) => {
+      try {
+        const { roomId } = data;
+        let targetRouter;
+
+        if (roomId) {
+          const roomState = getRoomState(roomId);
+          if (!roomState) return callback({ error: "Room not found" });
+          targetRouter = roomState.router;
+        } else {
+          targetRouter = getLegacyRouter();
+        }
+
+        callback({ rtpCapabilities: targetRouter.rtpCapabilities });
       } catch (error) {
         console.error("Error getting RTP capabilities:", error);
         callback({
@@ -25,44 +59,59 @@ export function setupSocketHandlers(io: Server) {
       }
     });
 
-    socket.on("createWebRtcTransport", async (data, callback) => {
-      try {
-        const { type } = data;
-        const router = getLegacyRouter();
-        const transport = await router.createWebRtcTransport(
-          webRtcTransportOptions
-        );
+    socket.on(
+      "createWebRtcTransport",
+      async (data: { type: string; roomId: string }, callback) => {
+        try {
+          const { roomId, type } = data;
+          let targetRouter;
+          let targetTransports;
 
-        if (!legacyTransports.has(socket.id)) {
-          legacyTransports.set(socket.id, {});
-        }
-
-        const transportType = type || "producer";
-        const socketTransports = legacyTransports.get(socket.id);
-
-        if (socketTransports) {
-          if (transportType === "producer") {
-            socketTransports.producer = transport;
+          if (roomId) {
+            const roomState = getRoomState(roomId);
+            if (!roomState) return callback({ error: "Room not found" });
+            targetRouter = roomState.router;
+            targetTransports = roomState.transports;
           } else {
-            socketTransports.consumer = transport;
+            targetRouter = getLegacyRouter();
+            targetTransports = legacyTransports;
           }
-        }
 
-        callback({
-          params: {
-            id: transport.id,
-            iceParameters: transport.iceParameters,
-            iceCandidates: transport.iceCandidates,
-            dtlsParameters: transport.dtlsParameters,
-          },
-        });
-      } catch (error) {
-        console.error("Error creating WebRTC transport:", error);
-        callback({
-          error: error instanceof Error ? error.message : "Unknown error",
-        });
+          const transport = await targetRouter.createWebRtcTransport(
+            webRtcTransportOptions
+          );
+
+          if (!targetTransports.has(socket.id)) {
+            targetTransports.set(socket.id, {});
+          }
+
+          const transportType = type || "producer";
+          const socketTransports = targetTransports.get(socket.id);
+
+          if (socketTransports) {
+            if (transportType === "producer") {
+              socketTransports.producer = transport;
+            } else {
+              socketTransports.consumer = transport;
+            }
+          }
+
+          callback({
+            params: {
+              id: transport.id,
+              iceParameters: transport.iceParameters,
+              iceCandidates: transport.iceCandidates,
+              dtlsParameters: transport.dtlsParameters,
+            },
+          });
+        } catch (error) {
+          console.error("Error creating WebRTC transport:", error);
+          callback({
+            error: error instanceof Error ? error.message : "Unknown error",
+          });
+        }
       }
-    });
+    );
 
     socket.on("connectTransport", async (data, callback) => {
       try {
@@ -218,6 +267,10 @@ export function setupSocketHandlers(io: Server) {
 
     socket.on("disconnect", () => {
       console.log(`Client disconnected: ${socket.id}`);
+
+      if (currentRoomId) {
+        leaveRoom(currentRoomId, socket.id);
+      }
 
       const transportsForSocket = legacyTransports.get(socket.id);
       const producerList = legacyProducers.get(socket.id);
