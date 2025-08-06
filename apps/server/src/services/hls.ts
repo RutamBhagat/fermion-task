@@ -1,4 +1,9 @@
-import type { Consumer, PlainTransport, Producer, Router } from "mediasoup/types";
+import type {
+  Consumer,
+  PlainTransport,
+  Producer,
+  Router,
+} from "mediasoup/types";
 import { existsSync, mkdirSync } from "node:fs";
 
 import type { ChildProcess } from "node:child_process";
@@ -80,4 +85,100 @@ export async function createCompositeHLSStream(
 
   // This is a placeholder return
   return { streamId, hlsUrl: `/hls/${streamId}/stream.m3u8` };
+}
+
+function buildFFmpegArgs(
+  sdpPath: string,
+  audioConsumers: Consumer[],
+  videoConsumers: Consumer[],
+  streamDir: string
+): string[] {
+  const ffmpegArgs = [
+    "-protocol_whitelist",
+    "file,rtp,udp",
+    "-f",
+    "sdp",
+    "-i",
+    sdpPath,
+  ];
+
+  let filterComplex = "";
+
+  if (videoConsumers.length > 1) {
+    const numVideos = videoConsumers.length;
+    const layout = numVideos <= 2 ? "2x1" : numVideos <= 4 ? "2x2" : "3x3";
+    const [cols, rows] = layout.split("x").map(Number);
+    const gridWidth = 1280;
+    const gridHeight = 720;
+    const videoWidth = Math.floor(gridWidth / cols);
+    const videoHeight = Math.floor(gridHeight / rows);
+
+    const videoInputs = videoConsumers
+      .map((_, i) => `[${i + audioConsumers.length}:v]`)
+      .join("");
+    const scaleFilters = videoConsumers
+      .map(
+        (_, i) =>
+          `[${
+            i + audioConsumers.length
+          }:v]scale=${videoWidth}:${videoHeight}[v${i}]`
+      )
+      .join(";");
+    const xstackInputs = Array.from(
+      { length: numVideos },
+      (_, i) => `[v${i}]`
+    ).join("");
+
+    const positions = Array.from(
+      { length: numVideos },
+      (_, i) =>
+        `${(i % cols) * videoWidth}_${Math.floor(i / cols) * videoHeight}`
+    ).join("|");
+    const xstackFilter = `${xstackInputs}xstack=inputs=${numVideos}:layout=${positions}[v]`;
+
+    filterComplex = `${scaleFilters};${xstackFilter}`;
+  }
+
+  if (audioConsumers.length > 1) {
+    const audioInputs = audioConsumers.map((_, i) => `[${i}:a]`).join("");
+    const amixFilter = `${audioInputs}amix=inputs=${audioConsumers.length}[a]`;
+    filterComplex = filterComplex
+      ? `${filterComplex};${amixFilter}`
+      : amixFilter;
+  }
+
+  if (filterComplex) {
+    ffmpegArgs.push("-filter_complex", filterComplex);
+  }
+
+  ffmpegArgs.push(
+    "-map",
+    videoConsumers.length > 1 ? "[v]" : `${audioConsumers.length}:v`
+  );
+  ffmpegArgs.push("-map", audioConsumers.length > 1 ? "[a]" : "0:a");
+
+  ffmpegArgs.push(
+    "-c:v",
+    "libx264",
+    "-preset",
+    "veryfast",
+    "-tune",
+    "zerolatency"
+  );
+
+  ffmpegArgs.push("-c:a", "aac", "-b:a", "128k");
+
+  ffmpegArgs.push(
+    "-f",
+    "hls",
+    "-hls_time",
+    "2",
+    "-hls_list_size",
+    "6",
+    "-hls_flags",
+    "delete_segments",
+    `${streamDir}/stream.m3u8`
+  );
+
+  return ffmpegArgs;
 }
