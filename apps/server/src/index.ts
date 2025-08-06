@@ -1,11 +1,12 @@
 import "dotenv/config";
+
 import { Hono } from "hono";
+import { Server } from "socket.io";
 import { cors } from "hono/cors";
+import { initMediasoup } from "@/services/mediasoup";
 import { logger } from "hono/logger";
 import { serve } from "@hono/node-server";
-import { initMediasoup } from "@/services/mediasoup";
-import { Server } from "socket.io";
-import { tryCatch } from "@/utils/try-catch";
+import { serveStatic } from '@hono/node-server/serve-static';
 import { setupSocketHandlers } from "@/handlers/socket";
 
 const app = new Hono();
@@ -22,6 +23,8 @@ app.use(
 app.get("/", (c) => {
   return c.text("Mediasoup SFU Server OK");
 });
+
+app.use('/hls/*', serveStatic({ root: './' }));
 
 async function startServer() {
   try {

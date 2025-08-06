@@ -215,3 +215,21 @@ function buildFFmpegArgs(
 
   return ffmpegArgs;
 }
+
+export function stopHLSStream(streamId: string) {
+  const process = hlsProcesses.get(streamId);
+  if (process) {
+    process.kill("SIGTERM");
+    hlsProcesses.delete(streamId);
+  }
+
+  const transports = plainTransports.get(streamId);
+  if (transports) {
+    transports.audioTransport?.close();
+    transports.videoTransport?.close();
+    plainTransports.delete(streamId);
+  }
+
+  console.log(`HLS stream stopped for ${streamId}`);
+  // We will add logic here later to delete the old files
+}

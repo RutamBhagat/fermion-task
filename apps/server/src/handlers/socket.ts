@@ -1,6 +1,7 @@
-import { webRtcTransportOptions } from "@/config/mediasoup";
 import type { Server, Socket } from "socket.io";
 import { createRoom, getRoomState, joinRoom, leaveRoom } from "@/services/room";
+
+import { webRtcTransportOptions } from "@/config/mediasoup";
 
 export function setupSocketHandlers(io: Server) {
   io.on("connection", (socket: Socket) => {
