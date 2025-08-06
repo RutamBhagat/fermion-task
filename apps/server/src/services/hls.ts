@@ -9,6 +9,8 @@ import { existsSync, mkdirSync } from "node:fs";
 import type { ChildProcess } from "node:child_process";
 import type { HLSStreamResult } from "@/types/index";
 import type { PlainTransports } from "@/types/index";
+import { promises as fs } from "node:fs";
+import { generateCompositeSDP } from "@/utils/sdp";
 import { plainTransportOptions } from "@/config/mediasoup";
 import { spawn } from "node:child_process";
 
@@ -69,24 +71,55 @@ export async function createCompositeHLSStream(
     currentPort += 2;
   }
 
-  // Generate SDP file (we'll build this helper next)
-  // const compositeSdp = generateCompositeSDP(audioConsumers, videoConsumers, basePort);
-  // const sdpPath = `${streamDir}/composite.sdp`;
-  // await fs.writeFile(sdpPath, compositeSdp);
-
-  // Build FFmpeg args (we'll build this helper next)
-  // const ffmpegArgs = buildFFmpegArgs(sdpPath, audioConsumers, videoConsumers, streamDir);
-
-  // For now, let's log what we've created
-  console.log(
-    `Created ${audioConsumers.length} audio consumers and ${videoConsumers.length} video consumers.`
+  const compositeSdp = generateCompositeSDP(
+    audioConsumers,
+    videoConsumers,
+    basePort
   );
-  console.log("Next steps: Generate SDP and spawn FFmpeg.");
+  const sdpPath = `${streamDir}/composite.sdp`;
+  await fs.writeFile(sdpPath, compositeSdp);
+  console.log(`Composite SDP created: ${sdpPath}`);
 
-  // This is a placeholder return
+  const ffmpegArgs = buildFFmpegArgs(
+    sdpPath,
+    audioConsumers,
+    videoConsumers,
+    streamDir
+  );
+  console.log(`Starting FFmpeg with args: ffmpeg ${ffmpegArgs.join(" ")}`);
+
+  const ffmpegProcess = spawn("ffmpeg", ffmpegArgs, {
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  hlsProcesses.set(streamId, ffmpegProcess);
+
+  const isDev = process.env.NODE_ENV !== 'production';
+
+  if (isDev) {
+    ffmpegProcess.stdout.on("data", (data) => {
+      console.log(`FFmpeg stdout [${streamId}]: ${data.toString()}`);
+    });
+    ffmpegProcess.stderr.on("data", (data) => {
+      console.error(`FFmpeg stderr [${streamId}]: ${data.toString()}`);
+    });
+  }
+  
+  ffmpegProcess.on("close", (code) => {
+    console.log(
+      `FFmpeg process for stream ${streamId} exited with code ${code}`
+    );
+    hlsProcesses.delete(streamId);
+  });
+
+  setTimeout(() => {
+    for (const consumer of [...audioConsumers, ...videoConsumers]) {
+      consumer.resume();
+    }
+  }, 1000);
+
   return { streamId, hlsUrl: `/hls/${streamId}/stream.m3u8` };
 }
-
 function buildFFmpegArgs(
   sdpPath: string,
   audioConsumers: Consumer[],
