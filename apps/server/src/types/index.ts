@@ -23,3 +23,8 @@ export interface PlainTransports {
   audioTransport?: PlainTransport;
   videoTransport?: PlainTransport;
 }
+
+export interface HLSStreamResult {
+  streamId: string;
+  hlsUrl: string;
+}
