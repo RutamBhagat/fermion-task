@@ -1,5 +1,6 @@
 import type {
   Consumer,
+  PlainTransport,
   Producer,
   Router,
   WebRtcTransport,
@@ -16,4 +17,9 @@ export interface RoomState {
   transports: Map<string, SocketTransports>;
   producers: Map<string, Producer[]>;
   consumers: Map<string, Consumer>;
+}
+
+export interface PlainTransports {
+  audioTransport?: PlainTransport;
+  videoTransport?: PlainTransport;
 }
