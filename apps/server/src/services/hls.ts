@@ -160,31 +160,38 @@ function buildFFmpegArgs(
 
   if (videoConsumers.length > 1) {
     const numVideos = videoConsumers.length;
-    let cols = numVideos <= 2 ? 2 : numVideos <= 4 ? 2 : numVideos <= 9 ? 3 : 4;
-    let rows = Math.ceil(numVideos / cols);
+    let cols, rows;
+    if (numVideos <= 2) {
+      cols = 2;
+      rows = 1;
+    } else if (numVideos <= 4) {
+      cols = 2;
+      rows = 2;
+    } else if (numVideos <= 9) {
+      cols = 3;
+      rows = 3;
+    } else {
+      cols = 4;
+      rows = Math.ceil(numVideos / 4);
+    }
 
-    const gridWidth = 1920;
-    const gridHeight = 1080;
+    const gridWidth = 1920,
+      gridHeight = 1080;
     const videoWidth = Math.floor(gridWidth / cols);
     const videoHeight = Math.floor(gridHeight / rows);
 
-    const scaledInputs: string[] = [];
-    for (let i = 0; i < numVideos; i++) {
-      scaledInputs.push(
+    const scaledInputs = videoConsumers.map(
+      (_, i) =>
         `[0:${
           videoStartIndex + i
         }]scale=${videoWidth}:${videoHeight}:force_original_aspect_ratio=increase,crop=${videoWidth}:${videoHeight}[scaled${i}]`
-      );
-    }
-
-    const positions: string[] = [];
-    const xstackInputs: string[] = [];
-    for (let i = 0; i < numVideos; i++) {
-      const row = Math.floor(i / cols);
-      const col = i % cols;
-      positions.push(`${col * videoWidth}_${row * videoHeight}`);
-      xstackInputs.push(`[scaled${i}]`);
-    }
+    );
+    const xstackInputs = videoConsumers.map((_, i) => `[scaled${i}]`);
+    const positions = Array.from(
+      { length: numVideos },
+      (_, i) =>
+        `${(i % cols) * videoWidth}_${Math.floor(i / cols) * videoHeight}`
+    );
 
     filterComplex = `${scaledInputs.join(";")};${xstackInputs.join(
       ""
@@ -199,9 +206,7 @@ function buildFFmpegArgs(
       : audioFilter;
   }
 
-  if (filterComplex) {
-    ffmpegArgs.push("-filter_complex", filterComplex);
-  }
+  if (filterComplex) ffmpegArgs.push("-filter_complex", filterComplex);
 
   if (videoConsumers.length > 1) ffmpegArgs.push("-map", "[v]");
   else if (videoConsumers.length === 1)
@@ -217,10 +222,23 @@ function buildFFmpegArgs(
       "ultrafast",
       "-tune",
       "zerolatency",
+      "-profile:v",
+      "baseline",
+      "-level",
+      "3.1",
       "-pix_fmt",
-      "yuv420p"
+      "yuv420p",
+      "-r",
+      "30",
+      "-g",
+      "30",
+      "-bf",
+      "0",
+      "-max_delay",
+      "0"
     );
   }
+
   if (audioConsumers.length > 0) {
     ffmpegArgs.push("-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2");
   }
@@ -233,13 +251,14 @@ function buildFFmpegArgs(
     "-hls_list_size",
     "6",
     "-hls_flags",
-    "delete_segments",
+    "delete_segments+program_date_time+independent_segments",
+    "-hls_segment_type",
+    "mpegts",
     `${streamDir}/stream.m3u8`
   );
 
   return ffmpegArgs;
 }
-
 export function stopHLSStream(streamId: string) {
   const process = hlsProcesses.get(streamId);
   if (process) {
