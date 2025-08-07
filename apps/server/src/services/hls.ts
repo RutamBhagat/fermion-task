@@ -120,13 +120,14 @@ export async function createCompositeHLSStream(
 
   setTimeout(async () => {
     try {
-      for (const consumer of [...audioConsumers, ...videoConsumers]) {
-        if (consumer.paused) {
-          await consumer.resume();
-          console.log(
-            `Consumer resumed for stream ${streamId}: ${consumer.kind}`
-          );
-        }
+      for (const consumer of audioConsumers) {
+        if (consumer.paused) await consumer.resume();
+      }
+
+      for (const consumer of videoConsumers) {
+        if (consumer.paused) await consumer.resume();
+        await consumer.requestKeyFrame();
+        console.log(`Keyframe requested for consumer ${consumer.id}`);
       }
     } catch (error) {
       console.error(`Error resuming consumers for stream ${streamId}:`, error);
