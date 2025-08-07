@@ -24,6 +24,11 @@ export function generateCompositeSDP(
       }/${codec.channels}`,
       "a=sendonly"
     );
+    if (consumer.rtpParameters.encodings?.[0]?.ssrc) {
+      sdpParts.push(
+        `a=ssrc:${consumer.rtpParameters.encodings[0].ssrc} cname:mediasoup`
+      );
+    }
     currentPort += 2;
   });
 
@@ -36,6 +41,11 @@ export function generateCompositeSDP(
       }`,
       "a=sendonly"
     );
+    if (consumer.rtpParameters.encodings?.[0]?.ssrc) {
+      sdpParts.push(
+        `a=ssrc:${consumer.rtpParameters.encodings[0].ssrc} cname:mediasoup`
+      );
+    }
     currentPort += 2;
   });
 
