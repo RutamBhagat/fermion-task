@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter, useParams } from "next/navigation";
-import { useMediaDevices } from "@/hooks/use-media-devices";
-import { useSocket } from "@/hooks/use-socket";
-import { useRoom } from "@/hooks/use-room";
-import { VideoGrid } from "@/components/video-grid";
+import { useParams, useRouter } from "next/navigation";
+
 import { ControlBar } from "@/components/control-bar";
+import { VideoGrid } from "@/components/video-grid";
+import { useHLSStream } from "@/hooks/use-hls-stream";
+import { useMediaDevices } from "@/hooks/use-media-devices";
+import { useRoom } from "@/hooks/use-room";
+import { useSocket } from "@/hooks/use-socket";
 
 export default function RoomPage() {
   const router = useRouter();
@@ -35,6 +37,23 @@ export default function RoomPage() {
     handleProducerClosed,
     cleanup,
   } = useRoom(meetingId);
+
+  const {
+    isHlsStreaming,
+    isStartingHls,
+    startHlsStream,
+    stopHlsStream,
+    // handleHlsStreamReady,
+    // handleHlsStreamFailed,
+  } = useHLSStream(meetingId);
+
+  const handleStartHls = () => {
+    if (socket) startHlsStream(socket);
+  };
+
+  const handleStopHls = () => {
+    if (socket) stopHlsStream(socket);
+  };
 
   const handleJoinCall = () => {
     if (socket && localStream) {
@@ -97,11 +116,10 @@ export default function RoomPage() {
         onToggleVideo={toggleVideo}
         onJoinCall={handleJoinCall}
         onLeaveCall={handleLeaveCall}
-        // We'll add HLS props later
-        isHlsStreaming={false}
-        isStartingHls={false}
-        onStartHls={() => {}}
-        onStopHls={() => {}}
+        isHlsStreaming={isHlsStreaming}
+        isStartingHls={isStartingHls}
+        onStartHls={handleStartHls}
+        onStopHls={handleStopHls}
       />
     </div>
   );
