@@ -1,6 +1,8 @@
 import type { Server, Socket } from "socket.io";
+import { createCompositeHLSStream, stopHLSStream } from "@/services/hls";
 import { createRoom, getRoomState, joinRoom, leaveRoom } from "@/services/room";
 
+import type { Producer } from "mediasoup/types";
 import { webRtcTransportOptions } from "@/config/mediasoup";
 
 export function setupSocketHandlers(io: Server) {
@@ -164,6 +166,63 @@ export function setupSocketHandlers(io: Server) {
 
       await consumer.resume();
       callback();
+    });
+
+    socket.on("startHLS", async ({ roomId }, callback) => {
+      try {
+        const roomState = getRoomState(roomId);
+        if (!roomState) {
+          return callback({ error: "Room not found" });
+        }
+
+        const streamId = `room_${roomId}_${Date.now()}`;
+        const allAudioProducers: Producer[] = [];
+        const allVideoProducers: Producer[] = [];
+
+        for (const participantId of roomState.participants) {
+          const producers = roomState.producers.get(participantId) || [];
+          for (const producer of producers) {
+            if (!producer.closed) {
+              if (producer.kind === "audio") {
+                allAudioProducers.push(producer);
+              } else if (producer.kind === "video") {
+                allVideoProducers.push(producer);
+              }
+            }
+          }
+        }
+
+        if (allAudioProducers.length === 0 && allVideoProducers.length === 0) {
+          return callback({
+            error: "No active producers in the room to stream.",
+          });
+        }
+
+        const result = await createCompositeHLSStream(
+          streamId,
+          allAudioProducers,
+          allVideoProducers,
+          roomState.router
+        );
+        callback(result);
+      } catch (error) {
+        console.error("Error starting HLS stream:", error);
+        callback({
+          error: error instanceof Error ? error.message : "Unknown error",
+        });
+      }
+    });
+
+    socket.on("stopHLS", ({ streamId }, callback) => {
+      try {
+        stopHLSStream(streamId);
+        callback({ success: true });
+      } catch (error) {
+        console.error("Error stopping HLS stream:", error);
+        callback({
+          error: error instanceof Error ? error.message : "Unknown error",
+        });
+      }
     });
 
     socket.on("disconnect", cleanup);
