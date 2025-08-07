@@ -135,6 +135,7 @@ export async function createCompositeHLSStream(
 
   return { streamId, hlsUrl: `/hls/${streamId}/stream.m3u8` };
 }
+
 function buildFFmpegArgs(
   sdpPath: string,
   audioConsumers: Consumer[],
@@ -142,6 +143,9 @@ function buildFFmpegArgs(
   streamDir: string
 ): string[] {
   const ffmpegArgs = [
+    "-y",
+    "-loglevel",
+    "debug",
     "-protocol_whitelist",
     "file,rtp,udp",
     "-f",
@@ -150,77 +154,75 @@ function buildFFmpegArgs(
     sdpPath,
   ];
 
+  const videoStartIndex = audioConsumers.length;
   let filterComplex = "";
 
   if (videoConsumers.length > 1) {
     const numVideos = videoConsumers.length;
-    const layout = numVideos <= 2 ? "2x1" : numVideos <= 4 ? "2x2" : "3x3";
-    const [cols, rows] = layout.split("x").map(Number);
-    const gridWidth = 1280;
-    const gridHeight = 720;
+    let cols = numVideos <= 2 ? 2 : numVideos <= 4 ? 2 : numVideos <= 9 ? 3 : 4;
+    let rows = Math.ceil(numVideos / cols);
+
+    const gridWidth = 1920;
+    const gridHeight = 1080;
     const videoWidth = Math.floor(gridWidth / cols);
     const videoHeight = Math.floor(gridHeight / rows);
 
-    const videoInputs = videoConsumers
-      .map((_, i) => `[${i + audioConsumers.length}:v]`)
-      .join("");
-    const scaleFilters = videoConsumers
-      .map(
-        (_, i) =>
-          `[${
-            i + audioConsumers.length
-          }:v]scale=${videoWidth}:${videoHeight}[v${i}]`
-      )
-      .join(";");
-    const xstackInputs = Array.from(
-      { length: numVideos },
-      (_, i) => `[v${i}]`
-    ).join("");
+    const scaledInputs: string[] = [];
+    for (let i = 0; i < numVideos; i++) {
+      scaledInputs.push(
+        `[0:${
+          videoStartIndex + i
+        }]scale=${videoWidth}:${videoHeight}:force_original_aspect_ratio=increase,crop=${videoWidth}:${videoHeight}[scaled${i}]`
+      );
+    }
 
-    const positions = Array.from(
-      { length: numVideos },
-      (_, i) =>
-        `${(i % cols) * videoWidth}_${Math.floor(i / cols) * videoHeight}`
-    ).join("|");
-    const xstackFilter = `${xstackInputs}xstack=inputs=${numVideos}:layout=${positions}[v]`;
+    const positions: string[] = [];
+    const xstackInputs: string[] = [];
+    for (let i = 0; i < numVideos; i++) {
+      const row = Math.floor(i / cols);
+      const col = i % cols;
+      positions.push(`${col * videoWidth}_${row * videoHeight}`);
+      xstackInputs.push(`[scaled${i}]`);
+    }
 
-    filterComplex = `${scaleFilters};${xstackFilter}`;
+    filterComplex = `${scaledInputs.join(";")};${xstackInputs.join(
+      ""
+    )}xstack=inputs=${numVideos}:layout=${positions.join("|")}:fill=black[v]`;
   }
 
   if (audioConsumers.length > 1) {
-    const audioInputs = audioConsumers.map((_, i) => `[${i}:a]`).join("");
-    const amixFilter = `${audioInputs}amix=inputs=${audioConsumers.length}[a]`;
+    const audioInputs = audioConsumers.map((_, i) => `[0:${i}]`).join("");
+    const audioFilter = `${audioInputs}amix=inputs=${audioConsumers.length}[a]`;
     filterComplex = filterComplex
-      ? `${filterComplex};${amixFilter}`
-      : amixFilter;
+      ? `${filterComplex};${audioFilter}`
+      : audioFilter;
   }
 
   if (filterComplex) {
     ffmpegArgs.push("-filter_complex", filterComplex);
   }
 
-  if (videoConsumers.length > 1) {
-    ffmpegArgs.push("-map", "[v]");
-  } else if (videoConsumers.length === 1) {
-    ffmpegArgs.push("-map", `0:${audioConsumers.length}`);
+  if (videoConsumers.length > 1) ffmpegArgs.push("-map", "[v]");
+  else if (videoConsumers.length === 1)
+    ffmpegArgs.push("-map", `0:${videoStartIndex}`);
+  if (audioConsumers.length > 1) ffmpegArgs.push("-map", "[a]");
+  else if (audioConsumers.length === 1) ffmpegArgs.push("-map", "0:0");
+
+  if (videoConsumers.length > 0) {
+    ffmpegArgs.push(
+      "-c:v",
+      "libx264",
+      "-preset",
+      "ultrafast",
+      "-tune",
+      "zerolatency",
+      "-pix_fmt",
+      "yuv420p"
+    );
   }
-
-  if (audioConsumers.length > 1) {
-    ffmpegArgs.push("-map", "[a]");
-  } else if (audioConsumers.length === 1) {
-    ffmpegArgs.push("-map", "0:0");
+  if (audioConsumers.length > 0) {
+    ffmpegArgs.push("-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2");
   }
-
-  ffmpegArgs.push(
-    "-c:v",
-    "libx264",
-    "-preset",
-    "veryfast",
-    "-tune",
-    "zerolatency"
-  );
-
-  ffmpegArgs.push("-c:a", "aac", "-b:a", "128k");
 
   ffmpegArgs.push(
     "-f",
