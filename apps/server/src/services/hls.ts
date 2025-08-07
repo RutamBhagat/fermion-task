@@ -46,8 +46,11 @@ export async function createCompositeHLSStream(
   let currentPort = basePort;
 
   for (const producer of audioProducers) {
+    const rtpPort = currentPort++;
+    const rtcpPort = currentPort++;
+
     const transport = await router.createPlainTransport(plainTransportOptions);
-    await transport.connect({ ip: "127.0.0.1", port: currentPort });
+    await transport.connect({ ip: "127.0.0.1", port: rtpPort, rtcpPort });
     const consumer = await transport.consume({
       producerId: producer.id,
       rtpCapabilities: router.rtpCapabilities,
@@ -59,8 +62,11 @@ export async function createCompositeHLSStream(
   }
 
   for (const producer of videoProducers) {
+    const rtpPort = currentPort++;
+    const rtcpPort = currentPort++;
+
     const transport = await router.createPlainTransport(plainTransportOptions);
-    await transport.connect({ ip: "127.0.0.1", port: currentPort });
+    await transport.connect({ ip: "127.0.0.1", port: rtpPort, rtcpPort });
     const consumer = await transport.consume({
       producerId: producer.id,
       rtpCapabilities: router.rtpCapabilities,
@@ -94,7 +100,7 @@ export async function createCompositeHLSStream(
 
   hlsProcesses.set(streamId, ffmpegProcess);
 
-  const isDev = process.env.NODE_ENV !== 'production';
+  const isDev = process.env.NODE_ENV !== "production";
 
   if (isDev) {
     ffmpegProcess.stdout.on("data", (data) => {
@@ -104,7 +110,7 @@ export async function createCompositeHLSStream(
       console.error(`FFmpeg stderr [${streamId}]: ${data.toString()}`);
     });
   }
-  
+
   ffmpegProcess.on("close", (code) => {
     console.log(
       `FFmpeg process for stream ${streamId} exited with code ${code}`
