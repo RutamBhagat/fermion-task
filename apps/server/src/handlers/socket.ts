@@ -202,7 +202,9 @@ export function setupSocketHandlers(io: Server) {
           streamId,
           allAudioProducers,
           allVideoProducers,
-          roomState.router
+          socket.id,
+          roomState.router,
+          io
         );
         callback(result);
       } catch (error) {
