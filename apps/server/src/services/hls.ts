@@ -118,11 +118,20 @@ export async function createCompositeHLSStream(
     hlsProcesses.delete(streamId);
   });
 
-  setTimeout(() => {
-    for (const consumer of [...audioConsumers, ...videoConsumers]) {
-      consumer.resume();
+  setTimeout(async () => {
+    try {
+      for (const consumer of [...audioConsumers, ...videoConsumers]) {
+        if (consumer.paused) {
+          await consumer.resume();
+          console.log(
+            `Consumer resumed for stream ${streamId}: ${consumer.kind}`
+          );
+        }
+      }
+    } catch (error) {
+      console.error(`Error resuming consumers for stream ${streamId}:`, error);
     }
-  }, 1000);
+  }, 2000);
 
   return { streamId, hlsUrl: `/hls/${streamId}/stream.m3u8` };
 }
@@ -190,11 +199,17 @@ function buildFFmpegArgs(
     ffmpegArgs.push("-filter_complex", filterComplex);
   }
 
-  ffmpegArgs.push(
-    "-map",
-    videoConsumers.length > 1 ? "[v]" : `${audioConsumers.length}:v`
-  );
-  ffmpegArgs.push("-map", audioConsumers.length > 1 ? "[a]" : "0:a");
+  if (videoConsumers.length > 1) {
+    ffmpegArgs.push("-map", "[v]");
+  } else if (videoConsumers.length === 1) {
+    ffmpegArgs.push("-map", `0:${audioConsumers.length}`);
+  }
+
+  if (audioConsumers.length > 1) {
+    ffmpegArgs.push("-map", "[a]");
+  } else if (audioConsumers.length === 1) {
+    ffmpegArgs.push("-map", "0:0");
+  }
 
   ffmpegArgs.push(
     "-c:v",
