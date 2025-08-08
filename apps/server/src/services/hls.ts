@@ -182,11 +182,32 @@ export async function createCompositeHLSStream(
   hlsProcesses.set(streamId, ffmpegProcess);
   streamSocketMap.set(streamId, socketId);
 
-  setTimeout(() => {
-    monitorHLSStream(streamId, socketId, io);
-  }, 3000);
+  console.log(`Composite HLS stream setup complete for ${streamId}, starting monitoring...`);
+  
+  await new Promise(resolve => setTimeout(resolve, 3000));
+  
+  const monitoringResult = await monitorHLSStream(streamId, socketId, io);
+  
+  if (!monitoringResult.success) {
+    const process = hlsProcesses.get(streamId);
+    if (process) {
+      process.kill("SIGTERM");
+      hlsProcesses.delete(streamId);
+    }
+    
+    const transports = plainTransports.get(streamId);
+    if (transports) {
+      if (transports.audioTransport) transports.audioTransport.close();
+      if (transports.videoTransport) transports.videoTransport.close();
+      plainTransports.delete(streamId);
+    }
+    
+    streamSocketMap.delete(streamId);
+    
+    throw new Error(monitoringResult.error || "HLS stream monitoring failed");
+  }
 
-  console.log(`Composite HLS stream created for ${streamId}`);
+  console.log(`HLS stream successfully started and verified for ${streamId}`);
   return { streamId, hlsUrl: `/hls/${streamId}/stream.m3u8` };
 }
 

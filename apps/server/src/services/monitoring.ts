@@ -7,30 +7,36 @@ export function monitorHLSStream(
   streamId: string,
   socketId: string,
   io: Server
-) {
-  const streamPath = `${HLS_DIR}/${streamId}/stream.m3u8`;
+): Promise<{ success: boolean; error?: string }> {
+  return new Promise((resolve) => {
+    const streamPath = `${HLS_DIR}/${streamId}/stream.m3u8`;
 
-  const checkStream = () => {
-    if (fs.existsSync(streamPath)) {
-      const content = fs.readFileSync(streamPath, "utf-8");
-      if (content.includes(".ts")) {
-        io.to(socketId).emit("hlsStreamReady", { streamId });
-        return true;
+    const checkStream = () => {
+      if (fs.existsSync(streamPath)) {
+        const content = fs.readFileSync(streamPath, "utf-8");
+        if (content.includes(".ts")) {
+          io.to(socketId).emit("hlsStreamReady", { streamId });
+          return true;
+        }
       }
-    }
-    return false;
-  };
+      return false;
+    };
 
-  let attempts = 0;
-  const interval = setInterval(() => {
-    if (checkStream() || ++attempts >= 30) {
-      if (attempts >= 30) {
-        io.to(socketId).emit("hlsStreamFailed", {
-          streamId,
-          error: "Stream timed out",
-        });
+    let attempts = 0;
+    const interval = setInterval(() => {
+      if (checkStream() || ++attempts >= 30) {
+        clearInterval(interval);
+        if (attempts >= 30) {
+          const error = "Stream timed out - no .ts segments generated";
+          io.to(socketId).emit("hlsStreamFailed", {
+            streamId,
+            error,
+          });
+          resolve({ success: false, error });
+        } else {
+          resolve({ success: true });
+        }
       }
-      clearInterval(interval);
-    }
-  }, 1000);
+    }, 1000);
+  });
 }

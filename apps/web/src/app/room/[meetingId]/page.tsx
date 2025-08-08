@@ -43,8 +43,6 @@ export default function RoomPage() {
     isStartingHls,
     startHlsStream,
     stopHlsStream,
-    // handleHlsStreamReady,
-    // handleHlsStreamFailed,
   } = useHLSStream(meetingId);
 
   const handleStartHls = () => {
