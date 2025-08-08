@@ -1,0 +1,9 @@
+services:
+  fermion-server:
+    build: .
+    container_name: fermion-server
+    ports:
+      - "3000:3000"
+      - "9999:9999/udp"
+      - "10000-10100:10000-10100/udp"
+    restart: unless-stopped

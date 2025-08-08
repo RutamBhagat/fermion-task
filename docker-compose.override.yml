@@ -1,0 +1,4 @@
+services:
+  fermion-server:
+    env_file:
+      - ./apps/server/.env.local
