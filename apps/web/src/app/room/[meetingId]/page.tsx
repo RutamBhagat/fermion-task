@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 
 import { ControlBar } from "@/components/control-bar";
 import { VideoGrid } from "@/components/video-grid";
+import { useEffect } from "react";
 import { useHLSStream } from "@/hooks/use-hls-stream";
 import { useMediaDevices } from "@/hooks/use-media-devices";
 import { useRoom } from "@/hooks/use-room";
