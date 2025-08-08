@@ -15,8 +15,6 @@ export default function RoomPage() {
   const params = useParams();
   const meetingId = params.meetingId as string;
 
-  const [status, setStatus] = useState("Connecting...");
-
   const { socket, isConnected } = useSocket({
     url: `${process.env.NEXT_PUBLIC_SERVER_URL}`,
   });
@@ -38,12 +36,8 @@ export default function RoomPage() {
     cleanup,
   } = useRoom(meetingId);
 
-  const {
-    isHlsStreaming,
-    isStartingHls,
-    startHlsStream,
-    stopHlsStream,
-  } = useHLSStream(meetingId);
+  const { isHlsStreaming, isStartingHls, startHlsStream, stopHlsStream } =
+    useHLSStream(meetingId);
 
   const handleStartHls = () => {
     if (socket) startHlsStream(socket);
@@ -55,9 +49,8 @@ export default function RoomPage() {
 
   const handleJoinCall = () => {
     if (socket && localStream) {
-      setStatus("Joining call...");
       createProducerTransportAndStartProducing(socket, localStream).then(() => {
-        setStatus("Live in call!");
+        console.log("Started producing local stream");
       });
     } else {
       alert("Could not get local media, please check permissions.");
@@ -75,13 +68,10 @@ export default function RoomPage() {
     const initialize = async () => {
       const stream = await getMedia();
       if (!stream) {
-        setStatus("Could not get media. Please check permissions.");
         return;
       }
 
-      setStatus("Joining room...");
       await joinRoom(socket);
-      setStatus("In room, ready to join call.");
     };
 
     initialize();
