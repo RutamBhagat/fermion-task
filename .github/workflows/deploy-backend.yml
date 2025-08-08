@@ -1,0 +1,119 @@
+name: Deploy Backend to EC2
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/server/**'
+      - '.github/workflows/**'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build backend
+        run: npm run build
+        working-directory: apps/server
+
+      - name: Create deployment package
+        run: |
+          mkdir -p deploy
+          cp -r apps/server/dist deploy/
+          cp apps/server/package.json deploy/
+          cp apps/server/ecosystem.config.cjs deploy/
+          tar -czf deploy.tar.gz -C deploy .
+
+      - name: Prepare Directory on EC2
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_PRIVATE_KEY }}
+          script: |
+            sudo mkdir -p /opt/hono-backend
+            
+            sudo chown -R ubuntu:ubuntu /opt/hono-backend
+
+      - name: Copy deployment package to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_PRIVATE_KEY }}
+          source: "deploy.tar.gz"
+          target: "/opt/hono-backend/"
+
+      - name: Deploy and Start Application
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_PRIVATE_KEY }}
+          script: |
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+            
+            sudo apt-get update
+            
+            if ! command -v ffmpeg &> /dev/null; then
+                echo "Installing FFmpeg for HLS streaming..."
+                sudo apt-get install -y ffmpeg
+            fi
+            
+            sudo apt-get install -y python3 python3-pip build-essential pkg-config libssl-dev
+            
+            echo "Verifying FFmpeg codecs..."
+            ffmpeg -encoders | grep -E "(libx264|aac)" || echo "Warning: Some codecs may be missing"
+            
+            cd /opt/hono-backend
+            
+            tar -xzf deploy.tar.gz
+            rm deploy.tar.gz
+            
+            # Create .env file from GitHub environment variables
+            cat > .env << EOF
+            CORS_ORIGIN=${{ vars.CORS_ORIGIN }}
+            NODE_ENV=${{ vars.NODE_ENV }}
+            WEBRTC_LISTEN_IP=${{ vars.WEBRTC_LISTEN_IP }}
+            ANNOUNCED_IP=${{ vars.ANNOUNCED_IP }}
+            EOF
+            
+            npm install --omit=dev
+            
+            # Install PM2 globally if not already installed
+            if ! command -v pm2 &> /dev/null; then
+                npm install -g pm2
+            fi
+            
+            pm2 startOrRestart ecosystem.config.cjs
+            
+            pm2 save
