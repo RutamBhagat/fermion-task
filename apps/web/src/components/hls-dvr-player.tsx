@@ -1,8 +1,7 @@
 "use client";
 
-import { useRef, useState } from "react";
-
 import ReactPlayer from "react-player";
+import { useState } from "react";
 
 interface HlsDvrPlayerProps {
   streamId: string;
@@ -22,7 +21,26 @@ export function HlsDvrPlayer({ streamId }: HlsDvrPlayerProps) {
         controls={true}
         width="100%"
         height="100%"
-        onReady={() => setIsBuffering(false)}
+        onReady={() => {
+          console.log("ReactPlayer onReady fired");
+          setIsBuffering(false);
+        }}
+        onStart={() => {
+          console.log("ReactPlayer onStart fired");
+          setIsBuffering(false);
+        }}
+        onPlay={() => {
+          console.log("ReactPlayer onPlay fired");
+          setIsBuffering(false);
+        }}
+        onLoadStart={() => {
+          console.log("ReactPlayer onLoadStart fired");
+          setIsBuffering(true);
+        }}
+        onCanPlay={() => {
+          console.log("ReactPlayer onCanPlay fired");
+          setIsBuffering(false);
+        }}
         onError={(e) => {
           console.error("Player error:", e);
           setError(
