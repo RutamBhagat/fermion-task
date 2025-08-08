@@ -38,7 +38,11 @@ jobs:
             ${{ runner.os }}-pnpm-store-
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: |
+          echo "Installing dependencies and building mediasoup..."
+          pnpm install --frozen-lockfile
+          echo "Verifying mediasoup installation..."
+          cd apps/server && node -e "require('mediasoup'); console.log('mediasoup loaded successfully')" || echo "mediasoup build may have failed"
 
       - name: Build backend
         run: npm run build
@@ -50,6 +54,8 @@ jobs:
           cp -r apps/server/dist deploy/
           cp apps/server/package.json deploy/
           cp apps/server/ecosystem.config.cjs deploy/
+          cp pnpm-lock.yaml deploy/
+          cp .npmrc deploy/
           tar -czf deploy.tar.gz -C deploy .
 
       - name: Prepare Directory on EC2
@@ -91,6 +97,12 @@ jobs:
             
             sudo apt-get install -y python3 python3-pip build-essential pkg-config libssl-dev
             
+            # Install pnpm globally if not installed
+            if ! command -v pnpm &> /dev/null; then
+                echo "Installing pnpm..."
+                npm install -g pnpm@10.14.0
+            fi
+            
             echo "Verifying FFmpeg codecs..."
             ffmpeg -encoders | grep -E "(libx264|aac)" || echo "Warning: Some codecs may be missing"
             
@@ -107,7 +119,13 @@ jobs:
             ANNOUNCED_IP=${{ vars.ANNOUNCED_IP }}
             EOF
             
-            npm install --omit=dev
+            # Use pnpm to install dependencies with proper mediasoup build
+            echo "Installing production dependencies with mediasoup build..."
+            pnpm install --prod --frozen-lockfile
+            
+            # Verify mediasoup installation
+            echo "Verifying mediasoup installation..."
+            node -e "require('mediasoup'); console.log('✅ mediasoup loaded successfully')" || echo "❌ mediasoup failed to load"
             
             # Install PM2 globally if not already installed
             if ! command -v pm2 &> /dev/null; then
