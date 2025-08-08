@@ -1,0 +1,4 @@
+{
+    "installCommand": "cd ../.. && pnpm install --filter=web --filter=web^...",
+    "buildCommand": "cd ../.. && pnpm build --filter=web"
+}
