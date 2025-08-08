@@ -19,6 +19,6 @@
   },
   "packageManager": "pnpm@10.14.0",
   "pnpm": {
-    "onlyBuiltDependencies": ["mediasoup"]
+    "neverBuiltDependencies": []
   }
 }
