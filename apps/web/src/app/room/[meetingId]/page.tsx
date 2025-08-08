@@ -86,7 +86,15 @@ export default function RoomPage() {
       socket.off("producerClosed");
       cleanup();
     };
-  }, [socket, isConnected, getMedia, handleProducerClosed, cleanup]);
+  }, [
+    socket,
+    isConnected,
+    getMedia,
+    handleProducerClosed,
+    cleanup,
+    createConsumer,
+    joinRoom,
+  ]);
 
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-black text-white">
