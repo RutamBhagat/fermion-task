@@ -18,14 +18,7 @@ export default function RoomPage() {
   const { socket, isConnected } = useSocket({
     url: `${process.env.NEXT_PUBLIC_SERVER_URL}`,
   });
-  const {
-    localStream,
-    isMuted,
-    isVideoOff,
-    getMedia,
-    toggleMute,
-    toggleVideo,
-  } = useMediaDevices();
+  
   const {
     isProducing,
     remoteParticipants,
@@ -33,8 +26,24 @@ export default function RoomPage() {
     createConsumer,
     createProducerTransportAndStartProducing,
     handleProducerClosed,
+    pauseProducer,
+    resumeProducer,
     cleanup,
   } = useRoom(meetingId);
+  
+  const {
+    localStream,
+    isMuted,
+    isVideoOff,
+    mediaError,
+    isLoading,
+    getMedia,
+    toggleMute,
+    toggleVideo,
+  } = useMediaDevices({
+    onProducerPause: pauseProducer,
+    onProducerResume: resumeProducer,
+  });
 
   const { isHlsStreaming, isStartingHls, startHlsStream, stopHlsStream } =
     useHLSStream(meetingId);
@@ -52,6 +61,10 @@ export default function RoomPage() {
       createProducerTransportAndStartProducing(socket, localStream).then(() => {
         console.log("Started producing local stream");
       });
+    } else if (mediaError) {
+      alert(mediaError);
+    } else if (isLoading) {
+      alert("Still loading media devices, please wait...");
     } else {
       alert("Could not get local media, please check permissions.");
     }
@@ -63,14 +76,13 @@ export default function RoomPage() {
   };
 
   useEffect(() => {
+    getMedia();
+  }, [getMedia]);
+
+  useEffect(() => {
     if (!socket || !isConnected) return;
 
     const initialize = async () => {
-      const stream = await getMedia();
-      if (!stream) {
-        return;
-      }
-
       await joinRoom(socket);
     };
 
@@ -89,7 +101,6 @@ export default function RoomPage() {
   }, [
     socket,
     isConnected,
-    getMedia,
     handleProducerClosed,
     cleanup,
     createConsumer,

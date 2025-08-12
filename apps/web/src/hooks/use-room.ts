@@ -222,6 +222,20 @@ export function useRoom(roomId: string) {
     setRemoteParticipants([]);
   }, []);
 
+  const pauseProducer = useCallback((kind: 'audio' | 'video') => {
+    const producer = producersRef.current.find(p => p.track?.kind === kind);
+    if (producer && !producer.paused) {
+      producer.pause();
+    }
+  }, []);
+
+  const resumeProducer = useCallback((kind: 'audio' | 'video') => {
+    const producer = producersRef.current.find(p => p.track?.kind === kind);
+    if (producer && producer.paused) {
+      producer.resume();
+    }
+  }, []);
+
   return {
     isProducing,
     remoteParticipants,
@@ -229,6 +243,8 @@ export function useRoom(roomId: string) {
     createConsumer,
     createProducerTransportAndStartProducing,
     handleProducerClosed,
+    pauseProducer,
+    resumeProducer,
     cleanup,
   };
 }

@@ -30,10 +30,13 @@ export function VideoGrid({
       <div key="local-video" className="relative overflow-hidden rounded-lg bg-gray-900">
         <video
           ref={(element) => {
-            if (element && localStream) {
-              element.srcObject = localStream;
+            if (element) {
+              if (localStream) {
+                element.srcObject = localStream;
+              }
             }
           }}
+          onLoadedMetadata={(e) => e.currentTarget.play()}
           autoPlay
           muted
           playsInline
