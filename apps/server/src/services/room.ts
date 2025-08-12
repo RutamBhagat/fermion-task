@@ -1,7 +1,7 @@
 import { getHLSProcesses, stopHLSStream } from "./hls.js";
+import { getLeastLoadedWorker, getWorkerStats } from "./mediasoup.js";
 
 import type { RoomState } from "@/types/index.js";
-import { getLeastLoadedWorker, getWorkerStats } from "./mediasoup.js";
 import { mediaCodecs } from "../config/mediasoup.js";
 
 const rooms = new Map<string, RoomState>();
@@ -16,7 +16,6 @@ export async function createRoom(roomId: string): Promise<RoomState> {
   const workerInfo = getLeastLoadedWorker();
   const router = await workerInfo.worker.createRouter({ mediaCodecs });
 
-  // Track which worker this room is using
   const workerIndex = getWorkerStats().findIndex(stat => stat.pid === workerInfo.worker.pid);
   roomToWorkerMap.set(roomId, workerIndex);
 
@@ -101,12 +100,10 @@ export function getRoomDistribution() {
   const workerStats = getWorkerStats();
   const distribution = new Map<number, string[]>();
   
-  // Initialize distribution map
   workerStats.forEach((_, index) => {
     distribution.set(index, []);
   });
   
-  // Distribute rooms to workers
   for (const [roomId, workerIndex] of roomToWorkerMap) {
     const roomList = distribution.get(workerIndex) || [];
     roomList.push(roomId);
