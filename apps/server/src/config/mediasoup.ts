@@ -1,4 +1,15 @@
-import type { PlainTransportOptions, RtpCodecCapability, WebRtcTransportOptions, WorkerSettings } from "mediasoup/types";
+import type {
+  PlainTransportOptions,
+  RtpCodecCapability,
+  WebRtcTransportOptions,
+  WorkerSettings,
+} from "mediasoup/types";
+
+export const workerSettings: WorkerSettings = {
+  logLevel: "debug",
+  rtcMinPort: 10000,
+  rtcMaxPort: 10100,
+};
 
 export const mediaCodecs: RtpCodecCapability[] = [
   {
@@ -43,12 +54,6 @@ export const mediaCodecs: RtpCodecCapability[] = [
     },
   },
 ];
-
-export const workerSettings: WorkerSettings = {
-  logLevel: "debug",
-  rtcMinPort: 10000,
-  rtcMaxPort: 10100,
-};
 
 export const webRtcTransportOptions: WebRtcTransportOptions = {
   listenIps: [
