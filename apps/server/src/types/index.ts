@@ -1,4 +1,5 @@
 import type {
+  ActiveSpeakerObserver,
   Consumer,
   PlainTransport,
   Producer,
@@ -17,6 +18,8 @@ export interface RoomState {
   transports: Map<string, SocketTransports>;
   producers: Map<string, Producer[]>;
   consumers: Map<string, Consumer>;
+  activeSpeakerObserver?: ActiveSpeakerObserver;
+  dominantSpeaker?: string;
 }
 
 export interface PlainTransports {
