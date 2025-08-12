@@ -1,10 +1,11 @@
 import { getHLSProcesses, stopHLSStream } from "./hls.js";
 
 import type { RoomState } from "@/types/index.js";
-import { getWorker } from "./mediasoup.js";
+import { getLeastLoadedWorker, getWorkerStats } from "./mediasoup.js";
 import { mediaCodecs } from "../config/mediasoup.js";
 
 const rooms = new Map<string, RoomState>();
+const roomToWorkerMap = new Map<string, number>();
 
 export async function createRoom(roomId: string): Promise<RoomState> {
   const existingRoom = rooms.get(roomId);
@@ -12,8 +13,12 @@ export async function createRoom(roomId: string): Promise<RoomState> {
     return existingRoom;
   }
 
-  const worker = getWorker();
-  const router = await worker.createRouter({ mediaCodecs });
+  const workerInfo = getLeastLoadedWorker();
+  const router = await workerInfo.worker.createRouter({ mediaCodecs });
+
+  // Track which worker this room is using
+  const workerIndex = getWorkerStats().findIndex(stat => stat.pid === workerInfo.worker.pid);
+  roomToWorkerMap.set(roomId, workerIndex);
 
   const roomState: RoomState = {
     router,
@@ -24,7 +29,7 @@ export async function createRoom(roomId: string): Promise<RoomState> {
   };
 
   rooms.set(roomId, roomState);
-  console.log(`Room created: ${roomId}`);
+  console.log(`Room created: ${roomId} on worker ${workerIndex} (${workerInfo.roomCount + 1} rooms)`);
   return roomState;
 }
 
@@ -80,12 +85,51 @@ export function leaveRoom(roomId: string, socketId: string): void {
       }
     }
 
+    const workerIndex = roomToWorkerMap.get(roomId);
     roomState.router.close();
     rooms.delete(roomId);
-    console.log(`Room ${roomId} deleted (empty)`);
+    roomToWorkerMap.delete(roomId);
+    console.log(`Room ${roomId} deleted (empty) from worker ${workerIndex}`);
   }
 }
 
 export function getAllRooms(): Map<string, RoomState> {
   return rooms;
+}
+
+export function getRoomDistribution() {
+  const workerStats = getWorkerStats();
+  const distribution = new Map<number, string[]>();
+  
+  // Initialize distribution map
+  workerStats.forEach((_, index) => {
+    distribution.set(index, []);
+  });
+  
+  // Distribute rooms to workers
+  for (const [roomId, workerIndex] of roomToWorkerMap) {
+    const roomList = distribution.get(workerIndex) || [];
+    roomList.push(roomId);
+    distribution.set(workerIndex, roomList);
+  }
+  
+  return {
+    workers: workerStats,
+    distribution: Object.fromEntries(distribution),
+    totalRooms: rooms.size,
+  };
+}
+
+export function getRoomWorkerInfo(roomId: string) {
+  const workerIndex = roomToWorkerMap.get(roomId);
+  if (workerIndex === undefined) {
+    return null;
+  }
+  
+  const workerStats = getWorkerStats();
+  return {
+    roomId,
+    workerIndex,
+    workerStats: workerStats[workerIndex],
+  };
 }

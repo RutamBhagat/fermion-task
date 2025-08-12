@@ -3,7 +3,8 @@ import "dotenv/config";
 import { Hono } from "hono";
 import { Server } from "socket.io";
 import { cors } from "hono/cors";
-import { initMediasoup } from "@/services/mediasoup";
+import { initMediasoup, getWorkerStats } from "@/services/mediasoup";
+import { getRoomDistribution } from "@/services/room";
 import { logger } from "hono/logger";
 import { serve } from "@hono/node-server";
 import { serveStatic } from '@hono/node-server/serve-static';
@@ -22,6 +23,14 @@ app.use(
 
 app.get("/", (c) => {
   return c.text("Mediasoup SFU Server OK");
+});
+
+app.get("/stats", (c) => {
+  return c.json(getRoomDistribution());
+});
+
+app.get("/workers", (c) => {
+  return c.json(getWorkerStats());
 });
 
 app.use('/hls/*', serveStatic({ root: './' }));
