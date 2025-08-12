@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 export function useMediaDevices() {
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
 
   const getMedia = useCallback(async () => {
@@ -14,6 +15,7 @@ export function useMediaDevices() {
         audio: true,
       });
       localStreamRef.current = stream;
+      setLocalStream(stream);
       console.log("Media stream obtained.");
       return stream;
     } catch (error) {
@@ -46,6 +48,7 @@ export function useMediaDevices() {
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((track) => track.stop());
       localStreamRef.current = null;
+      setLocalStream(null);
       console.log("Media stream stopped.");
     }
   }, []);
@@ -57,7 +60,7 @@ export function useMediaDevices() {
   }, [stopMedia]);
 
   return {
-    localStream: localStreamRef.current,
+    localStream,
     isMuted,
     isVideoOff,
     getMedia,
