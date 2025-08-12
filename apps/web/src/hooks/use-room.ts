@@ -16,6 +16,7 @@ export function useRoom(roomId: string) {
   const [remoteParticipants, setRemoteParticipants] = useState<
     RemoteParticipant[]
   >([]);
+  const [dominantSpeaker, setDominantSpeaker] = useState<string | null>(null);
   const deviceRef = useRef<Device | null>(null);
   const producerTransportRef = useRef<Transport | null>(null);
   const consumerTransportRef = useRef<Transport | null>(null);
@@ -220,15 +221,26 @@ export function useRoom(roomId: string) {
     consumersRef.current = [];
     setIsProducing(false);
     setRemoteParticipants([]);
+    setDominantSpeaker(null);
   }, []);
+
+  const handleDominantSpeakerChanged = useCallback(
+    ({ socketId }: { socketId: string }) => {
+      console.log('Dominant speaker changed:', socketId);
+      setDominantSpeaker(socketId);
+    },
+    []
+  );
 
   return {
     isProducing,
     remoteParticipants,
+    dominantSpeaker,
     joinRoom,
     createConsumer,
     createProducerTransportAndStartProducing,
     handleProducerClosed,
+    handleDominantSpeakerChanged,
     cleanup,
   };
 }
