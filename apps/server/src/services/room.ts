@@ -14,10 +14,17 @@ export async function createRoom(roomId: string): Promise<RoomState> {
   }
 
   const workerInfo = getLeastLoadedWorker();
-  const router = await workerInfo.worker.createRouter({ mediaCodecs });
+  const router = await workerInfo.worker.createRouter({ 
+    mediaCodecs,
+    appData: { roomId }
+  });
 
   const workerIndex = getWorkerStats().findIndex(stat => stat.pid === workerInfo.worker.pid);
   roomToWorkerMap.set(roomId, workerIndex);
+
+  const activeSpeakerObserver = await router.createActiveSpeakerObserver({
+    interval: 300,
+  });
 
   const roomState: RoomState = {
     router,
@@ -25,6 +32,8 @@ export async function createRoom(roomId: string): Promise<RoomState> {
     transports: new Map(),
     producers: new Map(),
     consumers: new Map(),
+    activeSpeakerObserver,
+    dominantSpeaker: undefined,
   };
 
   rooms.set(roomId, roomState);
@@ -63,6 +72,19 @@ export function leaveRoom(roomId: string, socketId: string): void {
   }
 
   if (producerList) {
+    // Remove audio producers from active speaker observer
+    if (roomState.activeSpeakerObserver) {
+      producerList.forEach((producer) => {
+        if (producer.kind === 'audio') {
+          try {
+            roomState.activeSpeakerObserver!.removeProducer({ producerId: producer.id });
+          } catch (error) {
+            console.warn(`Failed to remove producer ${producer.id} from active speaker observer:`, error);
+          }
+        }
+      });
+    }
+    
     producerList.forEach((producer) => producer.close());
     roomState.producers.delete(socketId);
   }
@@ -72,6 +94,11 @@ export function leaveRoom(roomId: string, socketId: string): void {
       consumer.close();
       roomState.consumers.delete(consumerId);
     }
+  }
+
+  // Clear dominant speaker if it was the leaving participant
+  if (roomState.dominantSpeaker === socketId) {
+    roomState.dominantSpeaker = undefined;
   }
 
   console.log(`Socket ${socketId} left room ${roomId}`);
@@ -85,6 +112,9 @@ export function leaveRoom(roomId: string, socketId: string): void {
     }
 
     const workerIndex = roomToWorkerMap.get(roomId);
+    if (roomState.activeSpeakerObserver) {
+      roomState.activeSpeakerObserver.close();
+    }
     roomState.router.close();
     rooms.delete(roomId);
     roomToWorkerMap.delete(roomId);
