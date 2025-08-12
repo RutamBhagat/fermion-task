@@ -115,6 +115,85 @@ export function setupSocketHandlers(io: Server) {
         }
         roomState.producers.get(socket.id)!.push(producer);
 
+        if (kind === "audio" && roomState.activeSpeakerObserver) {
+          try {
+            await roomState.activeSpeakerObserver.addProducer({
+              producerId: producer.id,
+            });
+            console.log(
+              `✅ Added audio producer ${producer.id} from socket ${socket.id} to active speaker observer`
+            );
+
+            if (
+              roomState.activeSpeakerObserver.listenerCount(
+                "dominantspeaker"
+              ) === 0
+            ) {
+              console.log(
+                `🎤 Setting up dominant speaker event listener for room ${roomId}`
+              );
+
+              roomState.activeSpeakerObserver.on(
+                "dominantspeaker",
+                (dominantSpeaker) => {
+                  console.log(
+                    `🎤 Dominant speaker event received: producerId=${dominantSpeaker.producer.id}`
+                  );
+
+                  let speakerSocketId: string | undefined;
+                  for (const [
+                    socketId,
+                    producers,
+                  ] of roomState.producers.entries()) {
+                    if (
+                      producers.some(
+                        (p) => p.id === dominantSpeaker.producer.id
+                      )
+                    ) {
+                      speakerSocketId = socketId;
+                      break;
+                    }
+                  }
+
+                  console.log(
+                    `🎤 Mapped producer ${dominantSpeaker.producer.id} to socket ${speakerSocketId}`
+                  );
+
+                  if (
+                    speakerSocketId &&
+                    speakerSocketId !== roomState.dominantSpeaker
+                  ) {
+                    roomState.dominantSpeaker = speakerSocketId;
+                    console.log(
+                      `🎤 Dominant speaker changed to: ${speakerSocketId}`
+                    );
+
+                    io.to(roomId).emit("dominantSpeakerChanged", {
+                      socketId: speakerSocketId,
+                      producerId: dominantSpeaker.producer.id,
+                    });
+
+                    console.log(
+                      `📡 Broadcasted dominant speaker change to room ${roomId}`
+                    );
+                  } else if (speakerSocketId === roomState.dominantSpeaker) {
+                    console.log(
+                      `🎤 Speaker ${speakerSocketId} is already the dominant speaker`
+                    );
+                  }
+                }
+              );
+            }
+
+            console.log(`🎤 Audio producer added to observer successfully`);
+          } catch (error) {
+            console.error(
+              `❌ Failed to add producer ${producer.id} to active speaker observer:`,
+              error
+            );
+          }
+        }
+
         socket.to(roomId).emit("newProducer", {
           producerId: producer.id,
           socketId: socket.id,
