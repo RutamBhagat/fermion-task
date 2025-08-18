@@ -22,10 +22,12 @@ export default function RoomPage() {
   const {
     isProducing,
     remoteParticipants,
+    dominantSpeaker,
     joinRoom,
     createConsumer,
     createProducerTransportAndStartProducing,
     handleProducerClosed,
+    handleDominantSpeakerChanged,
     pauseProducer,
     resumeProducer,
     cleanup,
@@ -92,16 +94,19 @@ export default function RoomPage() {
       createConsumer(socket, socketId)
     );
     socket.on("producerClosed", handleProducerClosed);
+    socket.on("dominantSpeakerChanged", handleDominantSpeakerChanged);
 
     return () => {
       socket.off("newProducer");
       socket.off("producerClosed");
+      socket.off("dominantSpeakerChanged");
       cleanup();
     };
   }, [
     socket,
     isConnected,
     handleProducerClosed,
+    handleDominantSpeakerChanged,
     cleanup,
     createConsumer,
     joinRoom,
@@ -112,6 +117,8 @@ export default function RoomPage() {
       <VideoGrid
         localStream={localStream}
         remoteParticipants={remoteParticipants}
+        dominantSpeaker={dominantSpeaker}
+        currentSocketId={socket?.id}
         isMuted={isMuted}
         isVideoOff={isVideoOff}
       />

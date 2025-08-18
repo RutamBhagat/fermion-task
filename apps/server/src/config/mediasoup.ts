@@ -27,6 +27,9 @@ export const mediaCodecs: RtpCodecCapability[] = [
       useinbandfec: 1,
       usedtx: 1,
     },
+    rtcpFeedback: [
+      { type: "nack" },
+    ],
   },
   {
     kind: "video",

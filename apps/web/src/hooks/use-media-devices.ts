@@ -10,6 +10,7 @@ interface UseMediaDevicesProps {
 export function useMediaDevices({ onProducerPause, onProducerResume }: UseMediaDevicesProps = {}) {
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [mediaError, setMediaError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -54,6 +55,7 @@ export function useMediaDevices({ onProducerPause, onProducerResume }: UseMediaD
       }
 
       localStreamRef.current = stream;
+      setLocalStream(stream);
       setMediaError(null);
       setIsLoading(false);
       console.log('Media stream obtained:', {
@@ -138,6 +140,7 @@ export function useMediaDevices({ onProducerPause, onProducerResume }: UseMediaD
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((track) => track.stop());
       localStreamRef.current = null;
+      setLocalStream(null);
       console.log("Media stream stopped.");
     }
   }, []);
@@ -149,7 +152,7 @@ export function useMediaDevices({ onProducerPause, onProducerResume }: UseMediaD
   }, [stopMedia]);
 
   return {
-    localStream: localStreamRef.current,
+    localStream,
     isMuted,
     isVideoOff,
     mediaError,

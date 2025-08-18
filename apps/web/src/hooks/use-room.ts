@@ -1,8 +1,9 @@
 "use client";
 
-import { Device } from "mediasoup-client";
-import type { Transport, Consumer, Producer } from "mediasoup-client/types";
+import type { Consumer, Producer, Transport } from "mediasoup-client/types";
 import { useCallback, useRef, useState } from "react";
+
+import { Device } from "mediasoup-client";
 import type { Socket } from "socket.io-client";
 
 interface RemoteParticipant {
@@ -16,6 +17,7 @@ export function useRoom(roomId: string) {
   const [remoteParticipants, setRemoteParticipants] = useState<
     RemoteParticipant[]
   >([]);
+  const [dominantSpeaker, setDominantSpeaker] = useState<string | null>(null);
   const deviceRef = useRef<Device | null>(null);
   const producerTransportRef = useRef<Transport | null>(null);
   const consumerTransportRef = useRef<Transport | null>(null);
@@ -220,7 +222,9 @@ export function useRoom(roomId: string) {
     consumersRef.current = [];
     setIsProducing(false);
     setRemoteParticipants([]);
+    setDominantSpeaker(null);
   }, []);
+  
 
   const pauseProducer = useCallback((kind: 'audio' | 'video') => {
     const producer = producersRef.current.find(p => p.track?.kind === kind);
@@ -235,16 +239,26 @@ export function useRoom(roomId: string) {
       producer.resume();
     }
   }, []);
+  
+  const handleDominantSpeakerChanged = useCallback(
+    ({ socketId }: { socketId: string }) => {
+      console.log('Dominant speaker changed:', socketId);
+      setDominantSpeaker(socketId);
+    },
+    []
+  );
 
   return {
     isProducing,
     remoteParticipants,
+    dominantSpeaker,
     joinRoom,
     createConsumer,
     createProducerTransportAndStartProducing,
     handleProducerClosed,
     pauseProducer,
     resumeProducer,
+    handleDominantSpeakerChanged,
     cleanup,
   };
 }
